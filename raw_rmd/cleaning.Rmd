@@ -7,4 +7,24 @@ knitr::opts_chunk$set(
   collapse = TRUE,
   comment = "#>"
 )
+knitr::opts_knit$set(
+  root.dir = here::here()
+)
+```
+
+# Introduction
+
+
+
+``` {r, echo = FALSE, out.width = "70%", dpi = 500}
+print("test")
+knitr::include_graphics(
+  path = "figures/figure_1.pdf"
+)
+```
+
+
+``` {r, eval = FALSE, echo = FALSE}
+knitr::knit(input = "raw_rmd/cleaning.Rmd",
+            output = "rendered_md/cleaning.md")
 ```
