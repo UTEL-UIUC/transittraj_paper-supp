@@ -11,15 +11,15 @@ knitr::opts_chunk$set(
 
 # Introduction
 
-
+Abc
 
 ``` {r, echo = FALSE, out.width = "70%"}
-print("test")
 knitr::include_graphics(
-  path = "figures/avl_traj_ex.png"
+  path = "figures/figure_1.pdf"
 )
 ```
 
+Defg
 
 ``` {r, eval = FALSE, echo = FALSE}
 knitr::knit(input = "vignettes/raw-cleaning.Rmd",

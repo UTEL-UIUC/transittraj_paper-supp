@@ -6,17 +6,13 @@ title: "The AVL Data Cleaning Workflow"
 
 # Introduction
 
-
-
-
-```
-#> [1] "test"
-```
+Abc
 
 <div class="figure">
-<img src="figures/avl_traj_ex.png" alt="plot of chunk unnamed-chunk-2" width="70%" />
+<embed src="figures/figure_1.pdf" title="plot of chunk unnamed-chunk-2" width="70%" type="application/pdf" />
 <p class="caption">plot of chunk unnamed-chunk-2</p>
 </div>
 
+Defg
 
 
