@@ -8,7 +8,7 @@ performance studies, but can be noisy, error-prone, and sparse.
 We present `transittraj`, an R package which cleans AVL point data and reconstructs
 continuous, differentiable, monotonic, and vertible vehicle trajectory functions.
 
-<img src="figures/figure_5.png" alt="Example `transittraj` trajectory." width="80%" />
+<img src="vignettes/figures/figure_1.png" alt="Example `transittraj` trajectory." width="80%" />
 
 This repository provides code to support the `transittraj` paper
 (*under review*), including all data cleaning, analysis, and visualization code.
