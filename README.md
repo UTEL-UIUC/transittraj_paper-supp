@@ -17,7 +17,7 @@ we encourage the reader to replicate our analyses with their own data.
 The vignettes presented here are not intended as stand-alone articles;
 for a beginner-friendly introduction to `transittraj` with open sample data,
 check out the vignettes out our
-[package website](https://github.com/UTEL-UIUC/transittraj/).
+[package website](https://utel-uiuc.github.io/transittraj/).
 
 ## Navigating this Repository
 
