@@ -6,15 +6,15 @@ title: "The AVL Data Cleaning Workflow"
 
 # Introduction
 
-This vignette contains all code use to clean and visualize the AVL data presented in our Journal of Public Transportation paper. This demonstrates the application of the workflow and provides a rough estimate of the package's efficiency by tracking the computation time of each step. We ran this code on a typical consumer laptop (HP Spectre x360, running on a 14-core 12th-gen Core i7-12700H with 16 GB of RAM).
+This vignette contains all code use to clean and visualize the AVL data presented in our Journal of Public Transportation paper. This demonstrates the application of the workflow and provides a rough estimate of the package's efficiency by tracking the computation time of each step. We ran this code on a typical consumer laptop (HP Spectre x360, with a 14-core 12th-gen Core i7-12700H and 16 GB of RAM).
 
-Check out the full paper or the [package website](https://utel-uiuc.github.io/transittraj/articles/data-workflow-la.html) for a more thorough discussion of these cleaning steps.
+This vignette is intended to complement our paper. Check out the full paper or the [package website](https://utel-uiuc.github.io/transittraj/articles/data-workflow-la.html) for a more thorough discussion of these cleaning steps.
 
 # Data
 
-The data we used here was shared with is privately by IndyGo
+The data we used here was shared with us privately by IndyGo
 via their Swiftly API endpoint. As such, we unfortunately cannot share the
-raw AVL data. We've pre-loaded the following IndyGo data into our RStudio
+raw data. We've pre-loaded the following IndyGo data into our RStudio
 workspace before running this vignette:
 
   - `avl_df`: The TIDES-compliant `vehicle_locations.csv` table of historic AVL data. This includes all northbound Red Line (90N) trips made on weekdays in September and November 2024.
@@ -123,9 +123,11 @@ polling_hist
 
 # Proposed Workflow
 
+The following sub-sections present each step of the proposed workflow. These steps are more thoroughly described in our paper and on the [package website](https://utel-uiuc.github.io/transittraj/articles/data-workflow-la.html). At each step, we record the number of points and trips removed and the processing time required. Finally, we show the code used to generate each example visualization found in the paper.
+
 ## Steps 1 & 2: Buffer & Project onto Route
 
-Steps 1 and 2 share the same function, `get_linear_distances()`, as they both require geospatial analysis. There's no need for the user to engage with spatial data, though, as long as your input TIDES table (`avl_df`) has the appropriate `latitude` and `longitude` numeric columns.
+Steps 1 and 2 share the same function, `get_linear_distances()`, as they both require geospatial analysis. We'll begin by running these steps:
 
 
 ``` r
@@ -673,9 +675,35 @@ traj_plot
 
 
 
-# Summary
+# Results
 
-With all steps complete, we can print our summary table of all cleaning steps:
+We now have our fit trajectory object, `traj`. We can see what the object holds using its `print()` and `summary()` methods:
+
+
+``` r
+print(traj)
+#> [1] "AVL group trajectory with 3100 trips."
+
+summary(traj)
+#> ------
+#> AVL Group Trajectory Object
+#> ------
+#> Number of trips: 3100
+#> Total distance range: 0 to 20499.99
+#> Total time range: 1730433602 to 1735707538
+#> ------
+#> Trajectory function present: TRUE
+#>    --> Trajectory interpolation method: monoH.FC
+#>    --> Maximum derivative: 3
+#>    --> Fit with speeds: TRUE
+#> Inverse function present: TRUE
+#>    --> Inverse function tolerance: 0.01
+#> ------
+```
+
+We will demonstrate the `plot()` and `predict()` methods for using trajectories in the vignette on signal performance metrics.
+
+With all steps complete, we can print our cleaning summary table:
 
 
 ``` r
@@ -702,7 +730,8 @@ summ_clean <- cleaning_summ %>%
          change_trips = paste(delta_trips, " (", perc_trips, "%)",
                             sep = "")) %>%
   select(-c(delta_n, perc_n, delta_trips, perc_trips)) %>%
-  rename(`Number of Observations` = n_obs,
+  rename(`Step` = step,
+         `Number of Observations` = n_obs,
          `Change in Observations` = change_obs,
          `Number of Trips` = n_trips,
          `Change in Trips` = change_trips,
@@ -713,29 +742,29 @@ knitr::kable(summ_clean)
 
 
 
-|step    |Number of Observations |Number of Trips | Time (s)|Change in Observations |Change in Trips |
+|Step    |Number of Observations |Number of Trips | Time (s)|Change in Observations |Change in Trips |
 |:-------|:----------------------|:---------------|--------:|:----------------------|:---------------|
 |Initial |1,707,095              |3,256           |       NA|NA (NA%)               |NA (NA%)        |
-|1 & 2   |1,348,250              |3,253           |    710.1|-358,845 (-21%)        |-3 (-0.1%)      |
-|3       |1,345,613              |3,246           |     37.5|-2,637 (-0.2%)         |-7 (-0.2%)      |
-|4       |1,344,129              |3,246           |    101.0|-1,484 (-0.1%)         |0 (0%)          |
-|5       |1,335,074              |3,241           |      0.6|-9,055 (-0.7%)         |-5 (-0.2%)      |
-|6       |1,304,499              |3,100           |      1.5|-30,575 (-2.3%)        |-141 (-4.4%)    |
-|7       |1,304,499              |3,100           |     94.2|0 (0%)                 |0 (0%)          |
-|Final   |NA                     |3,100           |     47.0|NA (NA%)               |0 (0%)          |
+|1 & 2   |1,348,250              |3,253           |    283.0|-358,845 (-21%)        |-3 (-0.1%)      |
+|3       |1,345,613              |3,246           |     20.1|-2,637 (-0.2%)         |-7 (-0.2%)      |
+|4       |1,344,129              |3,246           |     63.8|-1,484 (-0.1%)         |0 (0%)          |
+|5       |1,335,074              |3,241           |      0.4|-9,055 (-0.7%)         |-5 (-0.2%)      |
+|6       |1,304,499              |3,100           |      1.3|-30,575 (-2.3%)        |-141 (-4.4%)    |
+|7       |1,304,499              |3,100           |     71.1|0 (0%)                 |0 (0%)          |
+|Final   |NA                     |3,100           |     37.0|NA (NA%)               |0 (0%)          |
 
 
 
 
 
-Finally, the total time, in seconds, is:
+Finally, the total time required by the cleaning process, in seconds, is:
 
 
 ``` r
-total_time <- sum(cleaning_summ$`Time (s)`,
+total_time <- sum(cleaning_summ$t_sec,
                   na.rm = TRUE)
 print(total_time)
-#> [1] 0
+#> [1] 476.7503
 ```
 
 

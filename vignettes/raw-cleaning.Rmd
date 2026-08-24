@@ -11,15 +11,15 @@ knitr::opts_chunk$set(
 
 # Introduction
 
-This vignette contains all code use to clean and visualize the AVL data presented in our Journal of Public Transportation paper. This demonstrates the application of the workflow and provides a rough estimate of the package's efficiency by tracking the computation time of each step. We ran this code on a typical consumer laptop (HP Spectre x360, running on a 14-core 12th-gen Core i7-12700H with 16 GB of RAM).
+This vignette contains all code use to clean and visualize the AVL data presented in our Journal of Public Transportation paper. This demonstrates the application of the workflow and provides a rough estimate of the package's efficiency by tracking the computation time of each step. We ran this code on a typical consumer laptop (HP Spectre x360, with a 14-core 12th-gen Core i7-12700H and 16 GB of RAM).
 
 This vignette is intended to complement our paper. Check out the full paper or the [package website](https://utel-uiuc.github.io/transittraj/articles/data-workflow-la.html) for a more thorough discussion of these cleaning steps.
 
 # Data
 
-The data we used here was shared with is privately by IndyGo
+The data we used here was shared with us privately by IndyGo
 via their Swiftly API endpoint. As such, we unfortunately cannot share the
-raw AVL data. We've pre-loaded the following IndyGo data into our RStudio
+raw data. We've pre-loaded the following IndyGo data into our RStudio
 workspace before running this vignette:
 
   - `avl_df`: The TIDES-compliant `vehicle_locations.csv` table of historic AVL data. This includes all northbound Red Line (90N) trips made on weekdays in September and November 2024.
@@ -157,9 +157,11 @@ knitr::include_graphics("figures/figure_5.png")
 
 # Proposed Workflow
 
+The following sub-sections present each step of the proposed workflow. These steps are more thoroughly described in our paper and on the [package website](https://utel-uiuc.github.io/transittraj/articles/data-workflow-la.html). At each step, we record the number of points and trips removed and the processing time required. Finally, we show the code used to generate each example visualization found in the paper.
+
 ## Steps 1 & 2: Buffer & Project onto Route
 
-Steps 1 and 2 share the same function, `get_linear_distances()`, as they both require geospatial analysis. There's no need for the user to engage with spatial data, though, as long as your input TIDES table (`avl_df`) has the appropriate `latitude` and `longitude` numeric columns.
+Steps 1 and 2 share the same function, `get_linear_distances()`, as they both require geospatial analysis. We'll begin by running these steps:
 
 ```{r step12}
 # - Step 1 & 2: Buffer & Linearize -
@@ -819,9 +821,19 @@ ggsave(plot = combo_plot,
        dpi = 300, scale = 1.8)
 ```
 
-# Summary
+# Results
 
-With all steps complete, we can print our summary table of all cleaning steps:
+We now have our fit trajectory object, `traj`. We can see what the object holds using its `print()` and `summary()` methods:
+
+``` {r}
+print(traj)
+
+summary(traj)
+```
+
+We will demonstrate the `plot()` and `predict()` methods for using trajectories in the vignette on signal performance metrics.
+
+With all steps complete, we can print our cleaning summary table:
 
 ``` {r}
 cleaning_summ <- data.frame(step = c("Initial", "1 & 2", "3", "4",
@@ -862,7 +874,7 @@ write.csv(x = summ_clean,
           file = "C:\\Users\\obrie\\OneDrive - University of Illinois - Urbana\\IndyGo Project\\Deliverables\\Papers\\JPT\\tables\\cleaning_summ_082326.csv")
 ```
 
-Finally, the total time, in seconds, is:
+Finally, the total time required by the cleaning process, in seconds, is:
 
 ``` {r}
 total_time <- sum(cleaning_summ$t_sec,
