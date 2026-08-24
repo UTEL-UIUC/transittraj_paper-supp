@@ -904,3 +904,9 @@ Recognizing that the errors in reconstructed trajectories are concentrated along
 ``` {r}
 knitr::kable(pooled_summ_summ)
 ```
+
+``` {r, eval = FALSE, echo = FALSE}
+# - Knit -
+knitr::knit(input = "vignettes/raw-robustness.Rmd",
+            output = "vignettes/robustness.md")
+```

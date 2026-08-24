@@ -847,7 +847,8 @@ summ_clean <- cleaning_summ %>%
          change_trips = paste(delta_trips, " (", perc_trips, "%)",
                             sep = "")) %>%
   select(-c(delta_n, perc_n, delta_trips, perc_trips)) %>%
-  rename(`Number of Observations` = n_obs,
+  rename(`Step` = step,
+         `Number of Observations` = n_obs,
          `Change in Observations` = change_obs,
          `Number of Trips` = n_trips,
          `Change in Trips` = change_trips,
@@ -864,7 +865,7 @@ write.csv(x = summ_clean,
 Finally, the total time, in seconds, is:
 
 ``` {r}
-total_time <- sum(cleaning_summ$`Time (s)`,
+total_time <- sum(cleaning_summ$t_sec,
                   na.rm = TRUE)
 print(total_time)
 ```

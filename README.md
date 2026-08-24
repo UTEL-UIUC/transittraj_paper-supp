@@ -1,4 +1,4 @@
-# transittraj_paper-supp
+# `transittraj` Paper Supplementary Code
 
 ## Introduction
 
