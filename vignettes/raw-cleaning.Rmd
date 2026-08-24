@@ -11,9 +11,11 @@ knitr::opts_chunk$set(
 
 # Introduction
 
-This article contains all code that
+This vignette contains all code use to clean and visualize the AVL data presented in our Journal of Public Transportation paper. This demonstrates the application of the workflow and provides a rough estimate of the package's efficiency by tracking the computation time of each step. We ran this code on a typical consumer laptop (HP Spectre x360, running on a 14-core 12th-gen Core i7-12700H with 16 GB of RAM).
 
-# Setup
+Check out the full paper or the [package website](https://utel-uiuc.github.io/transittraj/articles/data-workflow-la.html) for a more thorough discussion of these cleaning steps.
+
+# Data
 
 The data we used here was shared with is privately by IndyGo
 via their Swiftly API endpoint. As such, we unfortunately cannot share the
@@ -34,7 +36,6 @@ library(tidyverse)
 # For plotting
 library(marquee)
 library(patchwork)
-library(ggspatial)
 ```
 
 Next, we'll set some parameters for our visualizations:
@@ -847,7 +848,7 @@ summ_clean <- cleaning_summ %>%
                             sep = "")) %>%
   select(-c(delta_n, perc_n, delta_trips, perc_trips)) %>%
   rename(`Number of Observations` = n_obs,
-         `Change in Observations` = change_n,
+         `Change in Observations` = change_obs,
          `Number of Trips` = n_trips,
          `Change in Trips` = change_trips,
          `Time (s)` = t_sec)

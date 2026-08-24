@@ -1,5 +1,5 @@
 ---
-title: "Estimating Signal Performance Measures using Reconstructed Trajectories"
+title: "Estimating Signal Performance Measures Using Reconstructed Trajectories"
 ---
 
 ```{r, include = FALSE}
@@ -11,7 +11,7 @@ knitr::opts_chunk$set(
 
 # Introduction
 
-This article contains all code use to estimate and visualize the signal performance measures presented in our Journal of Public Transportation paper. This demonstrates how `transittraj`'s `predict()` method for trajectory objects can easily estimate custom performance metrics. This vignette complements our full paper, as well as two additional vignettes:
+This vignette contains all code use to estimate and visualize the signal performance measures presented in our Journal of Public Transportation paper. This demonstrates how `transittraj`'s `predict()` method for trajectory objects can easily estimate custom performance metrics. This vignette complements our full paper, as well as two additional vignettes:
 
   - [The AVL CLeaning Workflow](), where we clean raw AVL data and reconstruct trajectory objects using `transittraj`.
   
@@ -801,5 +801,11 @@ suppressWarnings(
 
 ``` {r, echo = FALSE, eval = TRUE, out.width = "60%", dpi = 500}
 knitr::include_graphics(path = "figures/figure_7.png")
+```
+
+``` {r, eval = FALSE, echo = FALSE}
+# - Knit -
+knitr::knit(input = "vignettes/raw-cleaning.Rmd",
+            output = "vignettes/cleaning.md")
 ```
 
