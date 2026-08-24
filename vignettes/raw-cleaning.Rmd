@@ -161,7 +161,7 @@ knitr::include_graphics("figures/figure_5.png")
 
 Steps 1 and 2 share the same function, `get_linear_distances()`, as they both require geospatial analysis. There's no need for the user to engage with spatial data, though, as long as your input TIDES table (`avl_df`) has the appropriate `latitude` and `longitude` numeric columns.
 
-```{r}
+```{r step12}
 # - Step 1 & 2: Buffer & Linearize -
 t_0 <- Sys.time()
 distance_df <- get_linear_distances(avl_df = avl_df,
@@ -186,7 +186,7 @@ rm(avl_df)
 
 First, run the step:
 
-``` {r}
+``` {r step3}
 # - Step 3: Remove Overlap Subtrips -
 t_0 <- Sys.time()
 step3_df <- clean_overlapping_subtrips(distance_df = distance_df,
@@ -263,7 +263,7 @@ knitr::include_graphics(path = "figures/figure_3B.png")
 
 First, run the step:
 
-``` {r}
+``` {r step4}
 rm(distance_df)
 
 # - Step 4: Remove jumps -
@@ -372,7 +372,7 @@ knitr::include_graphics(path = "figures/figure_3C.png")
 
 First, run the step:
 
-``` {r}
+``` {r step5}
 rm(step3_df)
 
 # - Step 5: Clean insufficient trips -
@@ -479,7 +479,7 @@ knitr::include_graphics(path = "figures/figure_3D.png")
 
 First, run the step:
 
-``` {r}
+``` {r step6}
 rm(step4_df)
 
 # - Step 6: Trim trip tails -
@@ -562,7 +562,7 @@ knitr::include_graphics(path = "figures/figure_3E.png")
 
 First, run the step:
 
-``` {r}
+``` {r step7}
 rm(step5_df)
 
 # - Step 7: Correct monotonicty -
@@ -673,7 +673,7 @@ knitr::include_graphics(path = "figures/figure_3F.png")
 
 First, run the step:
 
-``` {r}
+``` {r final}
 rm(step6_df)
 
 # Run

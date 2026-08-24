@@ -6,9 +6,11 @@ title: "The AVL Data Cleaning Workflow"
 
 # Introduction
 
-This article contains all code that
+This vignette contains all code use to clean and visualize the AVL data presented in our Journal of Public Transportation paper. This demonstrates the application of the workflow and provides a rough estimate of the package's efficiency by tracking the computation time of each step. We ran this code on a typical consumer laptop (HP Spectre x360, running on a 14-core 12th-gen Core i7-12700H with 16 GB of RAM).
 
-# Setup
+Check out the full paper or the [package website](https://utel-uiuc.github.io/transittraj/articles/data-workflow-la.html) for a more thorough discussion of these cleaning steps.
+
+# Data
 
 The data we used here was shared with is privately by IndyGo
 via their Swiftly API endpoint. As such, we unfortunately cannot share the
@@ -30,7 +32,6 @@ library(tidyverse)
 # For plotting
 library(marquee)
 library(patchwork)
-library(ggspatial)
 ```
 
 Next, we'll set some parameters for our visualizations:
@@ -702,24 +703,30 @@ summ_clean <- cleaning_summ %>%
                             sep = "")) %>%
   select(-c(delta_n, perc_n, delta_trips, perc_trips)) %>%
   rename(`Number of Observations` = n_obs,
-         `Change in Observations` = change_n,
+         `Change in Observations` = change_obs,
          `Number of Trips` = n_trips,
          `Change in Trips` = change_trips,
          `Time (s)` = t_sec)
-#> Error in `rename()`:
-#> ! Can't rename columns that don't exist.
-#> ✖ Column `change_n` doesn't exist.
 
 knitr::kable(summ_clean)
-#> Error:
-#> ! object 'summ_clean' not found
 ```
 
 
-```
-#> Error:
-#> ! object 'summ_clean' not found
-```
+
+|step    |Number of Observations |Number of Trips | Time (s)|Change in Observations |Change in Trips |
+|:-------|:----------------------|:---------------|--------:|:----------------------|:---------------|
+|Initial |1,707,095              |3,256           |       NA|NA (NA%)               |NA (NA%)        |
+|1 & 2   |1,348,250              |3,253           |    710.1|-358,845 (-21%)        |-3 (-0.1%)      |
+|3       |1,345,613              |3,246           |     37.5|-2,637 (-0.2%)         |-7 (-0.2%)      |
+|4       |1,344,129              |3,246           |    101.0|-1,484 (-0.1%)         |0 (0%)          |
+|5       |1,335,074              |3,241           |      0.6|-9,055 (-0.7%)         |-5 (-0.2%)      |
+|6       |1,304,499              |3,100           |      1.5|-30,575 (-2.3%)        |-141 (-4.4%)    |
+|7       |1,304,499              |3,100           |     94.2|0 (0%)                 |0 (0%)          |
+|Final   |NA                     |3,100           |     47.0|NA (NA%)               |0 (0%)          |
+
+
+
+
 
 Finally, the total time, in seconds, is:
 

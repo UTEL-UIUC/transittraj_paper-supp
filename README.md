@@ -16,7 +16,7 @@ Unforatunately, we do not have permission to share the underlying data, though
 we encourage the reader to replicate our analyses with their own data.
 The vignettes presented here are not intended as stand-alone articles;
 for a beginner-friendly introduction to `transittraj` with open sample data,
-check out the vignettes out our
+check out the vignettes on the
 [package website](https://utel-uiuc.github.io/transittraj/).
 
 ## Navigating this Repository
