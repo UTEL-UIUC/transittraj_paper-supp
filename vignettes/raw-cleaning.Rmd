@@ -13,10 +13,10 @@ knitr::opts_chunk$set(
 
 
 
-``` {r, echo = FALSE, out.width = "70%", dpi = 500}
+``` {r, echo = FALSE, out.width = "70%"}
 print("test")
 knitr::include_graphics(
-  path = "figures/figure_1.pdf"
+  path = "figures/avl_traj_ex.png"
 )
 ```
 
