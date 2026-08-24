@@ -11,11 +11,9 @@ knitr::opts_chunk$set(
 
 # Introduction
 
-This vignette contains all code use to estimate and visualize the signal performance measures presented in our Journal of Public Transportation paper. This demonstrates how `transittraj`'s `predict()` method for trajectory objects can easily estimate custom performance metrics. This vignette complements our full paper, as well as two additional vignettes:
+This vignette contains all code use to estimate and visualize the signal performance measures presented in our Journal of Public Transportation paper. This demonstrates how `transittraj`'s `predict()` method for trajectory objects can easily estimate custom microscopic performance metrics.
 
-  - [The AVL CLeaning Workflow](), where we clean raw AVL data and reconstruct trajectory objects using `transittraj`.
-  
-  - [Evaluating the Robustness of Reconstructed Trajectories](), where we quantify the error in reconstructed trajectories with various interpolating methods at various polling frequencies.
+This vignette is intended to complement our paper. Check out the full paper or the [package website](https://utel-uiuc.github.io/transittraj/articles/indygo-signals.html) for a more thorough discussion of this methodology.
 
 # Data
 
