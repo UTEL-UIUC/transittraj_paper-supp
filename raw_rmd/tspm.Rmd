@@ -1,0 +1,10 @@
+---
+title: "Estimating Signal Performance Measures using Reconstructed Trajectories"
+---
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>"
+)
+```
