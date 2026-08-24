@@ -157,7 +157,7 @@ knitr::include_graphics("figures/figure_5.png")
 
 # Proposed Workflow
 
-The following sub-sections present each step of the proposed workflow. These steps are more thoroughly described in our paper and on the [package website](https://utel-uiuc.github.io/transittraj/articles/data-workflow-la.html). At each step, we record the number of points and trips removed and the processing time required. Finally, we show the code used to generate each example visualization found in the paper.
+The following sub-sections present each step of the proposed workflow. These steps are more thoroughly described in our paper and on the [package website](https://utel-uiuc.github.io/transittraj/articles/data-workflow-la.html). At each step, we record the number of points and trips removed and the processing time required. Finally, we show the code used to generate each example visualization found in the paper, though because the figures have already been generated, we do not run these chunks when rendering the vignette.
 
 ## Steps 1 & 2: Buffer & Project onto Route
 
@@ -180,8 +180,6 @@ n_obs <- append(n_obs,
                 dim(distance_df)[1])
 n_trips <- append(n_trips,
                   length(unique(distance_df$trip_id_performed)))
-
-rm(avl_df)
 ```
 
 ## Step 3: Remove Overlapping Subtrips
@@ -266,8 +264,6 @@ knitr::include_graphics(path = "figures/figure_3B.png")
 First, run the step:
 
 ``` {r step4}
-rm(distance_df)
-
 # - Step 4: Remove jumps -
 t_0 <- Sys.time()
 step4_df <- clean_jumps(distance_df = step3_df,
@@ -375,8 +371,6 @@ knitr::include_graphics(path = "figures/figure_3C.png")
 First, run the step:
 
 ``` {r step5}
-rm(step3_df)
-
 # - Step 5: Clean insufficient trips -
 t_0 <- Sys.time()
 step5_df <- trim_trips(distance_df = step4_df,
@@ -482,8 +476,6 @@ knitr::include_graphics(path = "figures/figure_3D.png")
 First, run the step:
 
 ``` {r step6}
-rm(step4_df)
-
 # - Step 6: Trim trip tails -
 t_0 <- Sys.time()
 step6_df <- clean_incomplete_trips(distance_df = step5_df,
@@ -565,8 +557,6 @@ knitr::include_graphics(path = "figures/figure_3E.png")
 First, run the step:
 
 ``` {r step7}
-rm(step5_df)
-
 # - Step 7: Correct monotonicty -
 t_0 <- Sys.time()
 step7_df <- make_monotonic(distance_df = step6_df,
@@ -676,8 +666,6 @@ knitr::include_graphics(path = "figures/figure_3F.png")
 First, run the step:
 
 ``` {r final}
-rm(step6_df)
-
 # Run
 t_0 <- Sys.time()
 traj <- get_trajectory_fun(distance_df = step7_df)
@@ -886,4 +874,4 @@ print(total_time)
 # - Knit -
 knitr::knit(input = "vignettes/raw-cleaning.Rmd",
             output = "vignettes/cleaning.md")
-```
+``` 

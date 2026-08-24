@@ -123,7 +123,7 @@ polling_hist
 
 # Proposed Workflow
 
-The following sub-sections present each step of the proposed workflow. These steps are more thoroughly described in our paper and on the [package website](https://utel-uiuc.github.io/transittraj/articles/data-workflow-la.html). At each step, we record the number of points and trips removed and the processing time required. Finally, we show the code used to generate each example visualization found in the paper.
+The following sub-sections present each step of the proposed workflow. These steps are more thoroughly described in our paper and on the [package website](https://utel-uiuc.github.io/transittraj/articles/data-workflow-la.html). At each step, we record the number of points and trips removed and the processing time required. Finally, we show the code used to generate each example visualization found in the paper, though because the figures have already been generated, we do not run these chunks when rendering the vignette.
 
 ## Steps 1 & 2: Buffer & Project onto Route
 
@@ -147,8 +147,6 @@ n_obs <- append(n_obs,
                 dim(distance_df)[1])
 n_trips <- append(n_trips,
                   length(unique(distance_df$trip_id_performed)))
-
-rm(avl_df)
 ```
 
 ## Step 3: Remove Overlapping Subtrips
@@ -221,8 +219,6 @@ First, run the step:
 
 
 ``` r
-rm(distance_df)
-
 # - Step 4: Remove jumps -
 t_0 <- Sys.time()
 step4_df <- clean_jumps(distance_df = step3_df,
@@ -317,8 +313,6 @@ First, run the step:
 
 
 ``` r
-rm(step3_df)
-
 # - Step 5: Clean insufficient trips -
 t_0 <- Sys.time()
 step5_df <- trim_trips(distance_df = step4_df,
@@ -413,8 +407,6 @@ First, run the step:
 
 
 ``` r
-rm(step4_df)
-
 # - Step 6: Trim trip tails -
 t_0 <- Sys.time()
 step6_df <- clean_incomplete_trips(distance_df = step5_df,
@@ -483,8 +475,6 @@ First, run the step:
 
 
 ``` r
-rm(step5_df)
-
 # - Step 7: Correct monotonicty -
 t_0 <- Sys.time()
 step7_df <- make_monotonic(distance_df = step6_df,
@@ -581,8 +571,6 @@ First, run the step:
 
 
 ``` r
-rm(step6_df)
-
 # Run
 t_0 <- Sys.time()
 traj <- get_trajectory_fun(distance_df = step7_df)
@@ -745,13 +733,13 @@ knitr::kable(summ_clean)
 |Step    |Number of Observations |Number of Trips | Time (s)|Change in Observations |Change in Trips |
 |:-------|:----------------------|:---------------|--------:|:----------------------|:---------------|
 |Initial |1,707,095              |3,256           |       NA|NA (NA%)               |NA (NA%)        |
-|1 & 2   |1,348,250              |3,253           |    283.0|-358,845 (-21%)        |-3 (-0.1%)      |
-|3       |1,345,613              |3,246           |     20.1|-2,637 (-0.2%)         |-7 (-0.2%)      |
-|4       |1,344,129              |3,246           |     63.8|-1,484 (-0.1%)         |0 (0%)          |
+|1 & 2   |1,348,250              |3,253           |    239.8|-358,845 (-21%)        |-3 (-0.1%)      |
+|3       |1,345,613              |3,246           |      2.7|-2,637 (-0.2%)         |-7 (-0.2%)      |
+|4       |1,344,129              |3,246           |     56.5|-1,484 (-0.1%)         |0 (0%)          |
 |5       |1,335,074              |3,241           |      0.4|-9,055 (-0.7%)         |-5 (-0.2%)      |
-|6       |1,304,499              |3,100           |      1.3|-30,575 (-2.3%)        |-141 (-4.4%)    |
-|7       |1,304,499              |3,100           |     71.1|0 (0%)                 |0 (0%)          |
-|Final   |NA                     |3,100           |     37.0|NA (NA%)               |0 (0%)          |
+|6       |1,304,499              |3,100           |      1.2|-30,575 (-2.3%)        |-141 (-4.4%)    |
+|7       |1,304,499              |3,100           |     73.6|0 (0%)                 |0 (0%)          |
+|Final   |NA                     |3,100           |     37.2|NA (NA%)               |0 (0%)          |
 
 
 
@@ -764,7 +752,7 @@ Finally, the total time required by the cleaning process, in seconds, is:
 total_time <- sum(cleaning_summ$t_sec,
                   na.rm = TRUE)
 print(total_time)
-#> [1] 476.7503
+#> [1] 411.2275
 ```
 
 
