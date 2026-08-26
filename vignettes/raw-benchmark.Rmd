@@ -1,0 +1,50 @@
+---
+title: "raw-benchmark"
+---
+
+``` {r setup, message = FALSE}
+library(transittraj)
+```
+
+``` {r}
+bench::mark(
+  # - Expressions -
+  # Steps 1 & 2
+  steps12 = get_linear_distances(avl_df = avl_df,
+                                    shape_geometry = route_geom,
+                                    clip_buffer = route_buffer,
+                                    project_crs = indy_crs),
+  # Step 3
+  step3 = clean_overlapping_subtrips(distance_df = distance_df,
+                                       check_operator = TRUE,
+                                       return_removals = FALSE),
+  # Step 4
+  step4 = clean_jumps(distance_df = step3_df,
+                        t_cutoff = hampel_t),
+  # Step 5
+  step5 = trim_trips(distance_df = step4_df,
+                       trim_type = "both"),
+  # Step 6
+  step6 = clean_incomplete_trips(distance_df = step5_df,
+                                   min_trip_distance = min_dist,
+                                   min_trip_duration = min_dur,
+                                   max_distance_gap = max_d_gap),
+  # Step 7
+  step7 = make_monotonic(distance_df = step6_df,
+                           correct_speed = TRUE,
+                           add_distance_error = dist_error),
+  # Fit
+  final = get_trajectory_fun(distance_df = step7_df),
+  # - Parameters -
+  min_time = Inf,
+  iterations = 3,
+  check = FALSE,
+  time_unit = "s"
+)
+
+t <- bench::mark(
+  step5 = trim_trips(distance_df = step4_df,
+                       trim_type = "both"),
+  min_time = Inf, iterations = 3, check = TRUE, time_unit = "s"
+)
+```

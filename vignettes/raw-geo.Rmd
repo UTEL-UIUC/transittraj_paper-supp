@@ -1,0 +1,172 @@
+---
+title: "raw-geo"
+---
+
+``` {r setup}
+library(transittraj)
+library(sf)
+library(geos)
+library(tidyverse)
+```
+
+``` {r}
+avl_df <- readRDS("C:\\Users\\obrie\\OneDrive - University of Illinois - Urbana\\IndyGo Project\\Analysis_new\\avl_data\\rt90\\precleaned\\avl_90N_2024_10to12_df.rds") %>%
+# avl_df <- readRDS("C:\\Users\\obrie\\OneDrive - University of Illinois - Urbana\\IndyGo Project\\Analysis_new\\avl_data\\rt90\\precleaned\\avl_90N_2024_07to09_df.rds") %>%
+  filter(week(event_timestamp) %in% c(46)) %>%
+  mutate(operator_id = as.character(operator_id),
+         location_ping_id = as.character(location_ping_id))
+shape_geometry <- readRDS("C:\\Users\\obrie\\OneDrive - University of Illinois - Urbana\\IndyGo Project\\Analysis_new\\spatial\\routes\\route_geom_90N.rds")
+```
+
+``` {r}
+# Params
+clip_buffer <- 50 # meters
+project_crs <- 32616
+original_crs <- 4326
+
+# - SF -
+avl_sf <- avl_df %>%
+  sf::st_as_sf(coords = c("longitude", "latitude")) %>%
+  sf::st_set_crs(original_crs) %>%
+  sf::st_transform(crs = project_crs)
+shape_geometry_sfc <- sf::st_geometry(shape_geometry)
+route_buffer_sf <- sf::st_buffer(shape_geometry_sfc, clip_buffer)
+avl_clipped_sf <- suppressWarnings(
+  sf::st_intersection(x = avl_sf, y = route_buffer_sf))
+avl_sfc <- sf::st_geometry(avl_clipped_sf)
+dist_df_sf <- sf::st_drop_geometry(avl_clipped_sf)
+
+# - Geos- 
+avl_geos <- avl_df %>%
+  # Start with SF; easier to transform
+  sf::st_as_sf(coords = c("longitude", "latitude")) %>%
+  sf::st_set_crs(original_crs) %>%
+  sf::st_transform(crs = project_crs) %>%
+  # Create geos
+  dplyr::mutate(geos_geom = geos::as_geos_geometry(geometry)) %>%
+  sf::st_drop_geometry()
+shape_geos <- geos::as_geos_geometry(shape_geometry)
+route_buffer_geos <- geos::geos_buffer(geom = shape_geos,
+                                  distance = clip_buffer)
+avl_clipped_geos <- avl_geos %>%
+  dplyr::mutate(in_buffer = geos::geos_prepared_intersects(geom1 = route_buffer_geos,
+                                                        geom2 = geos_geom)) %>%
+  dplyr::filter(in_buffer) %>%
+  dplyr::select(-in_buffer)
+```
+
+``` {r}
+sf_buff <- function() {
+  
+  route_buffer <- sf::st_buffer(shape_geometry_sfc, clip_buffer)
+  avl_clipped <- suppressWarnings(
+    sf::st_intersection(x = avl_sf, y = route_buffer))
+  
+  return(avl_clipped)
+}
+sf_proj <- function() {
+  
+  shape_len <- sf::st_length(shape_geometry)
+  avl_dist_norm <- sf::st_line_project(line = shape_geometry_sfc, point = avl_sfc,
+                                       normalized = TRUE)
+  avl_dist = avl_dist_norm * shape_len
+  
+  units(avl_dist) <- NULL
+  dist_df_sf <- dist_df_sf %>%
+    dplyr::mutate(distance = avl_dist)
+  
+  return(dist_df_sf)
+}
+sf_proj2 <- function() {
+  
+  avl_dist <- sf::st_line_project(line = shape_geometry_sfc,
+                                  point = avl_sfc)
+  
+  units(avl_dist) <- NULL
+  dist_df_sf <- dist_df_sf %>%
+    dplyr::mutate(distance = avl_dist)
+  
+  return(dist_df_sf)
+}
+```
+
+``` {r}
+geos_buff <- function() {
+  
+  route_buffer <- geos::geos_buffer(geom = shape_geos,
+                                    distance = clip_buffer)
+  avl_clipped <- avl_geos %>%
+    dplyr::mutate(in_buffer = geos::geos_within(geom1 = geos_geom,
+                                                geom2 = route_buffer)) %>%
+    dplyr::filter(in_buffer) %>%
+    dplyr::select(-in_buffer)
+  
+  return(avl_clipped)
+}
+geos_buff2 <- function() {
+  
+  route_buffer <- geos::geos_buffer(geom = shape_geos,
+                                    distance = clip_buffer)
+  avl_clipped <- avl_geos %>%
+    dplyr::mutate(in_buffer = geos::geos_intersects(geom1 = geos_geom,
+                                                    geom2 = route_buffer)) %>%
+    dplyr::filter(in_buffer) %>%
+    dplyr::select(-in_buffer)
+  
+  return(avl_clipped)
+}
+geos_buff3 <- function() { # use this one
+  
+  route_buffer <- geos::geos_buffer(geom = shape_geos,
+                                    distance = clip_buffer)
+  avl_clipped <- avl_geos %>%
+    dplyr::mutate(in_buffer = geos::geos_prepared_intersects(geom1 = route_buffer,
+                                                        geom2 = geos_geom)) %>%
+    dplyr::filter(in_buffer) %>%
+    dplyr::select(-in_buffer)
+  
+  return(avl_clipped)
+}
+geos_proj <- function() { # use this one
+  
+  dist_df <- avl_clipped_geos %>%
+    dplyr::mutate(distance = geos::geos_project(geom2 = geos_geom,
+                                                geom1 = shape_geos)) %>%
+    dplyr::select(-geos_geom)
+  
+  return(dist_df)
+}
+```
+
+``` {r}
+# Buffer
+buff <- bench::mark(
+  geos1 = geos_buff(),
+  geos2 = geos_buff2(),
+  geos3 = geos_buff3(),
+  sf = sf_buff(),
+  iterations = 10, time_unit = "s", check = FALSE
+)
+
+# Proj
+proj <- bench::mark(
+  geos1 = geos_proj(),
+  sf2 = sf_proj2(),
+  iterations = 10, time_unit = "s", check = FALSE
+)
+```
+
+
+``` {r}
+t1 <- sf_proj()
+t2 <- geos_proj()
+
+res <- t1 %>%
+  select(location_ping_id, distance) %>%
+  rename(distance_sf = distance) %>%
+  left_join(y = (t2 %>%
+                   select(location_ping_id, distance) %>%
+                   rename(distance_geos = distance)),
+            by = "location_ping_id") %>%
+  mutate(dist_res = distance_sf - distance_geos)
+```

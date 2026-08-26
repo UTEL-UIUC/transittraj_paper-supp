@@ -13,7 +13,7 @@ knitr::opts_chunk$set(
 
 This vignette contains all code use to clean and visualize the AVL data presented in our Journal of Public Transportation paper. This demonstrates the application of the workflow and provides a rough estimate of the package's efficiency by tracking the computation time of each step. We ran this code on a typical consumer laptop (HP Spectre x360, with a 14-core 12th-gen Core i7-12700H and 16 GB of RAM).
 
-This vignette is intended to complement our paper. Check out the full paper or the [package website](https://utel-uiuc.github.io/transittraj/articles/data-workflow-la.html) for a more thorough discussion of these cleaning steps.
+This vignette is intended to complement our paper. Check out the full paper or the [package website](https://utel-uiuc.github.io/transittraj/articles/data-workflow-la.html) for a more thorough discussion of these cleaning steps. You can check out the raw, un-knit `Rmarkdown` code [here](raw-cleaning.Rmd).
 
 # Data
 
@@ -77,6 +77,9 @@ min_dur = 90 # seconds
 dist_error = 0.001 # meters
 max_d_gap = 800 # meters
 hampel_t = 3
+
+# - Benchmark parameters -
+bench_iter <- 20
 ```
 
 ``` {r, echo = FALSE}
@@ -106,6 +109,7 @@ We'll begin by quickly exploring the average polling frequencies by each trip. B
 # Get initial dims
 n_obs <- dim(avl_df)[1]
 n_trips <- length(unique(avl_df$trip_id_performed))
+dur <- list()
 
 # Polling
 bin_width <- 2.5 # sec
@@ -157,25 +161,29 @@ knitr::include_graphics("figures/figure_5.png")
 
 # Proposed Workflow
 
-The following sub-sections present each step of the proposed workflow. These steps are more thoroughly described in our paper and on the [package website](https://utel-uiuc.github.io/transittraj/articles/data-workflow-la.html). At each step, we record the number of points and trips removed and the processing time required. Finally, we show the code used to generate each example visualization found in the paper, though because the figures have already been generated, we do not run these chunks when rendering the vignette.
+The following sub-sections present each step of the proposed workflow. These steps are more thoroughly described in our paper. To evaluate the processing time required for each step, we wrap each function in `bench::mark()` and pass additional parameters relevant to the benchmark; some cleaner code, without the additional benchmarking, is available on the [package website](https://utel-uiuc.github.io/transittraj/articles/data-workflow-la.html).
+
+At each step, we also record the number of points and trips removed. Finally, we show the code used to generate each example visualization found in the paper, though because the figures have already been generated, we do not run these chunks when rendering the vignette. To see all un-rendered chunks, check out the [raw vignette](raw-cleaning.rmd).
 
 ## Steps 1 & 2: Buffer & Project onto Route
 
-Steps 1 and 2 share the same function, `get_linear_distances()`, as they both require geospatial analysis. We'll begin by running these steps:
+Steps 1 and 2 share the same function, `get_linear_distances()`, as they both require spatial analyses using the `geos` package under the hood. We'll begin by running these steps:
 
 ```{r step12}
 # - Step 1 & 2: Buffer & Linearize -
-t_0 <- Sys.time()
-distance_df <- get_linear_distances(avl_df = avl_df,
-                                    shape_geometry = route_geom,
-                                    clip_buffer = route_buffer,
-                                    project_crs = indy_crs) %>%
-  filter(distance < 20500)
-t_f <- Sys.time()
+steps12 <- bench::mark(
+  # transittraj
+  steps12 = get_linear_distances(avl_df = avl_df,
+                                 shape_geometry = route_geom,
+                                 clip_buffer = route_buffer,
+                                 project_crs = indy_crs),
+  # benchmark
+  time_unit = "s", check = TRUE, iterations = bench_iter, min_time = Inf
+)
+distance_df <- steps12$result[[1]] %>% filter(distance < 20500)
+dur[["1 & 2"]] <- steps12[,1:8]
 
 # Save changes
-dur <- c(NA,
-         as.numeric(difftime(t_f, t_0, units = "secs")))
 n_obs <- append(n_obs,
                 dim(distance_df)[1])
 n_trips <- append(n_trips,
@@ -188,15 +196,18 @@ First, run the step:
 
 ``` {r step3}
 # - Step 3: Remove Overlap Subtrips -
-t_0 <- Sys.time()
-step3_df <- clean_overlapping_subtrips(distance_df = distance_df,
-                                       check_operator = TRUE,
-                                       return_removals = FALSE)
-t_f <- Sys.time()
+step3 <- bench::mark(
+  # transittraj
+  step3 = clean_overlapping_subtrips(distance_df = distance_df,
+                                     check_operator = TRUE,
+                                     return_removals = FALSE),
+  # benchmark
+  time_unit = "s", check = TRUE, iterations = bench_iter, min_time = Inf
+)
+step3_df <- step3$result[[1]]
+dur[["3"]] <- step3[,1:8]
 
 # Save changes
-dur <- append(dur,
-              as.numeric(difftime(t_f, t_0, units = "secs")))
 n_obs <- append(n_obs,
                 dim(step3_df)[1])
 n_trips <- append(n_trips,
@@ -265,14 +276,17 @@ First, run the step:
 
 ``` {r step4}
 # - Step 4: Remove jumps -
-t_0 <- Sys.time()
-step4_df <- clean_jumps(distance_df = step3_df,
-                        t_cutoff = hampel_t)
-t_f <- Sys.time()
+step4 <- bench::mark(
+  # transittraj
+  step4 = clean_jumps(distance_df = step3_df,
+                      t_cutoff = hampel_t),
+  # benchmark
+  time_unit = "s", check = TRUE, iterations = bench_iter, min_time = Inf
+)
+step4_df <- step4$result[[1]]
+dur[["4"]] <- step4[,1:8]
 
 # Save changes
-dur <- append(dur,
-              as.numeric(difftime(t_f, t_0, units = "secs")))
 n_obs <- append(n_obs,
                 dim(step4_df)[1])
 n_trips <- append(n_trips,
@@ -372,14 +386,17 @@ First, run the step:
 
 ``` {r step5}
 # - Step 5: Clean insufficient trips -
-t_0 <- Sys.time()
-step5_df <- trim_trips(distance_df = step4_df,
-                       trim_type = "both")
-t_f <- Sys.time()
+step5 <- bench::mark(
+  # transittraj
+  step5 = trim_trips(distance_df = step4_df,
+                       trim_type = "both"),
+  # benchmark
+  time_unit = "s", check = TRUE, iterations = bench_iter, min_time = Inf
+)
+step5_df <- step5$result[[1]]
+dur[["5"]] <- step5[,1:8]
 
 # Save changes
-dur <- append(dur,
-              as.numeric(difftime(t_f, t_0, units = "secs")))
 n_obs <- append(n_obs,
                 dim(step5_df)[1])
 n_trips <- append(n_trips,
@@ -477,16 +494,19 @@ First, run the step:
 
 ``` {r step6}
 # - Step 6: Trim trip tails -
-t_0 <- Sys.time()
-step6_df <- clean_incomplete_trips(distance_df = step5_df,
-                                   min_trip_distance = min_dist,
-                                   min_trip_duration = min_dur,
-                                   max_distance_gap = max_d_gap)
-t_f <- Sys.time()
+step6 <- bench::mark(
+  # transittraj
+  step6 = clean_incomplete_trips(distance_df = step5_df,
+                                 min_trip_distance = min_dist,
+                                 min_trip_duration = min_dur,
+                                 max_distance_gap = max_d_gap),
+  # benchmark
+  time_unit = "s", check = TRUE, iterations = bench_iter, min_time = Inf
+)
+step6_df <- step6$result[[1]]
+dur[["6"]] <- step6[,1:8]
 
 # Save changes
-dur <- append(dur,
-              as.numeric(difftime(t_f, t_0, units = "secs")))
 n_obs <- append(n_obs,
                 dim(step6_df)[1])
 n_trips <- append(n_trips,
@@ -558,15 +578,18 @@ First, run the step:
 
 ``` {r step7}
 # - Step 7: Correct monotonicty -
-t_0 <- Sys.time()
-step7_df <- make_monotonic(distance_df = step6_df,
-                           correct_speed = TRUE,
-                           add_distance_error = dist_error)
-t_f <- Sys.time()
+step7 <- bench::mark(
+  # transittraj
+  step7 = make_monotonic(distance_df = step6_df,
+                         correct_speed = TRUE,
+                         add_distance_error = dist_error),
+  # benchmark
+  time_unit = "s", check = TRUE, iterations = bench_iter, min_time = Inf
+)
+step7_df <- step7$result[[1]]
+dur[["7"]] <- step7[,1:8]
 
 # Save changes
-dur <- append(dur,
-              as.numeric(difftime(t_f, t_0, units = "secs")))
 n_obs <- append(n_obs,
                 dim(step7_df)[1])
 n_trips <- append(n_trips,
@@ -667,13 +690,16 @@ First, run the step:
 
 ``` {r final}
 # Run
-t_0 <- Sys.time()
-traj <- get_trajectory_fun(distance_df = step7_df)
-t_f <- Sys.time()
+fin <- bench::mark(
+  # transittraj
+  fin = get_trajectory_fun(distance_df = step7_df),
+  # benchmark
+  time_unit = "s", check = TRUE, iterations = bench_iter, min_time = Inf
+)
+traj <- fin$result[[1]]
+dur[["Final"]] <- fin[,1:8]
 
 # Get info
-dur <- append(dur,
-              as.numeric(difftime(t_f, t_0, units = "secs")))
 n_obs <- append(n_obs, NA)
 n_trips <- append(n_trips,
                   length(unclass(traj)))
@@ -824,11 +850,15 @@ We will demonstrate the `plot()` and `predict()` methods for using trajectories 
 With all steps complete, we can print our cleaning summary table:
 
 ``` {r}
+dur_df <- bind_rows(dur, .id = "step")
+
 cleaning_summ <- data.frame(step = c("Initial", "1 & 2", "3", "4",
                                      "5", "6", "7", "Final"),
                             n_obs = n_obs,
-                            n_trips = n_trips,
-                            t_sec = dur) %>%
+                            n_trips = n_trips) %>%
+  left_join(y = (dur_df %>%
+                   select(step, median)),
+            by = "step") %>%
   mutate(delta_n = n_obs - lag(n_obs),
          perc_n = delta_n / lag(n_obs) * 100,
          delta_trips = n_trips - lag(n_trips),
@@ -837,7 +867,7 @@ cleaning_summ <- data.frame(step = c("Initial", "1 & 2", "3", "4",
 summ_clean <- cleaning_summ %>%
   mutate(n_obs = format(n_obs, big.mark = ","),
          n_trips = format(n_trips, big.mark = ","),
-         t_sec = round(t_sec, 1),
+         median = round(median, 1),
          delta_n = format(delta_n, big.mark = ","),
          perc_n = round(perc_n, 1),
          delta_trips = format(delta_trips, big.mark = ","),
@@ -852,7 +882,7 @@ summ_clean <- cleaning_summ %>%
          `Change in Observations` = change_obs,
          `Number of Trips` = n_trips,
          `Change in Trips` = change_trips,
-         `Time (s)` = t_sec)
+         `Median Time (s)` = median)
 
 knitr::kable(summ_clean)
 ```
@@ -865,7 +895,7 @@ write.csv(x = summ_clean,
 Finally, the total time required by the cleaning process, in seconds, is:
 
 ``` {r}
-total_time <- sum(cleaning_summ$t_sec,
+total_time <- sum(cleaning_summ$median,
                   na.rm = TRUE)
 print(total_time)
 ```

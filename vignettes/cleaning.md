@@ -8,7 +8,7 @@ title: "The AVL Data Cleaning Workflow"
 
 This vignette contains all code use to clean and visualize the AVL data presented in our Journal of Public Transportation paper. This demonstrates the application of the workflow and provides a rough estimate of the package's efficiency by tracking the computation time of each step. We ran this code on a typical consumer laptop (HP Spectre x360, with a 14-core 12th-gen Core i7-12700H and 16 GB of RAM).
 
-This vignette is intended to complement our paper. Check out the full paper or the [package website](https://utel-uiuc.github.io/transittraj/articles/data-workflow-la.html) for a more thorough discussion of these cleaning steps.
+This vignette is intended to complement our paper. Check out the full paper or the [package website](https://utel-uiuc.github.io/transittraj/articles/data-workflow-la.html) for a more thorough discussion of these cleaning steps. You can check out the raw, un-knit `Rmarkdown` code [here](raw-cleaning.Rmd).
 
 # Data
 
@@ -75,6 +75,9 @@ min_dur = 90 # seconds
 dist_error = 0.001 # meters
 max_d_gap = 800 # meters
 hampel_t = 3
+
+# - Benchmark parameters -
+bench_iter <- 20
 ```
 
 
@@ -86,6 +89,7 @@ We'll begin by quickly exploring the average polling frequencies by each trip. B
 # Get initial dims
 n_obs <- dim(avl_df)[1]
 n_trips <- length(unique(avl_df$trip_id_performed))
+dur <- list()
 
 # Polling
 bin_width <- 2.5 # sec
@@ -123,26 +127,31 @@ polling_hist
 
 # Proposed Workflow
 
-The following sub-sections present each step of the proposed workflow. These steps are more thoroughly described in our paper and on the [package website](https://utel-uiuc.github.io/transittraj/articles/data-workflow-la.html). At each step, we record the number of points and trips removed and the processing time required. Finally, we show the code used to generate each example visualization found in the paper, though because the figures have already been generated, we do not run these chunks when rendering the vignette.
+The following sub-sections present each step of the proposed workflow. These steps are more thoroughly described in our paper. To evaluate the processing time required for each step, we wrap each function in `bench::mark()` and pass additional parameters relevant to the benchmark; some cleaner code, without the additional benchmarking, is available on the [package website](https://utel-uiuc.github.io/transittraj/articles/data-workflow-la.html).
+
+At each step, we also record the number of points and trips removed. Finally, we show the code used to generate each example visualization found in the paper, though because the figures have already been generated, we do not run these chunks when rendering the vignette. To see all un-rendered chunks, check out the [raw vignette](raw-cleaning.rmd).
 
 ## Steps 1 & 2: Buffer & Project onto Route
 
-Steps 1 and 2 share the same function, `get_linear_distances()`, as they both require geospatial analysis. We'll begin by running these steps:
+Steps 1 and 2 share the same function, `get_linear_distances()`, as they both require spatial analyses using the `geos` package under the hood. We'll begin by running these steps:
 
 
 ``` r
 # - Step 1 & 2: Buffer & Linearize -
-t_0 <- Sys.time()
-distance_df <- get_linear_distances(avl_df = avl_df,
-                                    shape_geometry = route_geom,
-                                    clip_buffer = route_buffer,
-                                    project_crs = indy_crs) %>%
-  filter(distance < 20500)
-t_f <- Sys.time()
+steps12 <- bench::mark(
+  # transittraj
+  steps12 = get_linear_distances(avl_df = avl_df,
+                                 shape_geometry = route_geom,
+                                 clip_buffer = route_buffer,
+                                 project_crs = indy_crs),
+  # benchmark
+  time_unit = "s", check = TRUE, iterations = bench_iter, min_time = Inf
+)
+#> Warning: Some expressions had a GC in every iteration; so filtering is disabled.
+distance_df <- steps12$result[[1]] %>% filter(distance < 20500)
+dur[["1 & 2"]] <- steps12[,1:8]
 
 # Save changes
-dur <- c(NA,
-         as.numeric(difftime(t_f, t_0, units = "secs")))
 n_obs <- append(n_obs,
                 dim(distance_df)[1])
 n_trips <- append(n_trips,
@@ -156,15 +165,18 @@ First, run the step:
 
 ``` r
 # - Step 3: Remove Overlap Subtrips -
-t_0 <- Sys.time()
-step3_df <- clean_overlapping_subtrips(distance_df = distance_df,
-                                       check_operator = TRUE,
-                                       return_removals = FALSE)
-t_f <- Sys.time()
+step3 <- bench::mark(
+  # transittraj
+  step3 = clean_overlapping_subtrips(distance_df = distance_df,
+                                     check_operator = TRUE,
+                                     return_removals = FALSE),
+  # benchmark
+  time_unit = "s", check = TRUE, iterations = bench_iter, min_time = Inf
+)
+step3_df <- step3$result[[1]]
+dur[["3"]] <- step3[,1:8]
 
 # Save changes
-dur <- append(dur,
-              as.numeric(difftime(t_f, t_0, units = "secs")))
 n_obs <- append(n_obs,
                 dim(step3_df)[1])
 n_trips <- append(n_trips,
@@ -220,14 +232,18 @@ First, run the step:
 
 ``` r
 # - Step 4: Remove jumps -
-t_0 <- Sys.time()
-step4_df <- clean_jumps(distance_df = step3_df,
-                        t_cutoff = hampel_t)
-t_f <- Sys.time()
+step4 <- bench::mark(
+  # transittraj
+  step4 = clean_jumps(distance_df = step3_df,
+                      t_cutoff = hampel_t),
+  # benchmark
+  time_unit = "s", check = TRUE, iterations = bench_iter, min_time = Inf
+)
+#> Warning: Some expressions had a GC in every iteration; so filtering is disabled.
+step4_df <- step4$result[[1]]
+dur[["4"]] <- step4[,1:8]
 
 # Save changes
-dur <- append(dur,
-              as.numeric(difftime(t_f, t_0, units = "secs")))
 n_obs <- append(n_obs,
                 dim(step4_df)[1])
 n_trips <- append(n_trips,
@@ -314,16 +330,59 @@ First, run the step:
 
 ``` r
 # - Step 5: Clean insufficient trips -
-t_0 <- Sys.time()
-step5_df <- trim_trips(distance_df = step4_df,
-                       trim_type = "both")
+step5 <- bench::mark(
+  # transittraj
+  step5 = trim_trips(distance_df = step4_df,
+                       trim_type = "both"),
+  # benchmark
+  time_unit = "s", check = TRUE, iterations = bench_iter, min_time = Inf
+)
 #> Warning: Trips found with maximum at or before minimum point -- potential wrong direction.
 #> Removing the following: 2024-11-22-t325-b2331-sl3-N, 2024-11-25-t803-b2335-sl3-N, 2024-12-05-t60E-b2334-sl3-N, 2024-12-12-t84D-b233C-sl3-N, 2024-12-31-t5-b233D-sl3-N
-t_f <- Sys.time()
+#> Trips found with maximum at or before minimum point -- potential wrong direction.
+#> Removing the following: 2024-11-22-t325-b2331-sl3-N, 2024-11-25-t803-b2335-sl3-N, 2024-12-05-t60E-b2334-sl3-N, 2024-12-12-t84D-b233C-sl3-N, 2024-12-31-t5-b233D-sl3-N
+#> Trips found with maximum at or before minimum point -- potential wrong direction.
+#> Removing the following: 2024-11-22-t325-b2331-sl3-N, 2024-11-25-t803-b2335-sl3-N, 2024-12-05-t60E-b2334-sl3-N, 2024-12-12-t84D-b233C-sl3-N, 2024-12-31-t5-b233D-sl3-N
+#> Trips found with maximum at or before minimum point -- potential wrong direction.
+#> Removing the following: 2024-11-22-t325-b2331-sl3-N, 2024-11-25-t803-b2335-sl3-N, 2024-12-05-t60E-b2334-sl3-N, 2024-12-12-t84D-b233C-sl3-N, 2024-12-31-t5-b233D-sl3-N
+#> Trips found with maximum at or before minimum point -- potential wrong direction.
+#> Removing the following: 2024-11-22-t325-b2331-sl3-N, 2024-11-25-t803-b2335-sl3-N, 2024-12-05-t60E-b2334-sl3-N, 2024-12-12-t84D-b233C-sl3-N, 2024-12-31-t5-b233D-sl3-N
+#> Trips found with maximum at or before minimum point -- potential wrong direction.
+#> Removing the following: 2024-11-22-t325-b2331-sl3-N, 2024-11-25-t803-b2335-sl3-N, 2024-12-05-t60E-b2334-sl3-N, 2024-12-12-t84D-b233C-sl3-N, 2024-12-31-t5-b233D-sl3-N
+#> Trips found with maximum at or before minimum point -- potential wrong direction.
+#> Removing the following: 2024-11-22-t325-b2331-sl3-N, 2024-11-25-t803-b2335-sl3-N, 2024-12-05-t60E-b2334-sl3-N, 2024-12-12-t84D-b233C-sl3-N, 2024-12-31-t5-b233D-sl3-N
+#> Trips found with maximum at or before minimum point -- potential wrong direction.
+#> Removing the following: 2024-11-22-t325-b2331-sl3-N, 2024-11-25-t803-b2335-sl3-N, 2024-12-05-t60E-b2334-sl3-N, 2024-12-12-t84D-b233C-sl3-N, 2024-12-31-t5-b233D-sl3-N
+#> Trips found with maximum at or before minimum point -- potential wrong direction.
+#> Removing the following: 2024-11-22-t325-b2331-sl3-N, 2024-11-25-t803-b2335-sl3-N, 2024-12-05-t60E-b2334-sl3-N, 2024-12-12-t84D-b233C-sl3-N, 2024-12-31-t5-b233D-sl3-N
+#> Trips found with maximum at or before minimum point -- potential wrong direction.
+#> Removing the following: 2024-11-22-t325-b2331-sl3-N, 2024-11-25-t803-b2335-sl3-N, 2024-12-05-t60E-b2334-sl3-N, 2024-12-12-t84D-b233C-sl3-N, 2024-12-31-t5-b233D-sl3-N
+#> Trips found with maximum at or before minimum point -- potential wrong direction.
+#> Removing the following: 2024-11-22-t325-b2331-sl3-N, 2024-11-25-t803-b2335-sl3-N, 2024-12-05-t60E-b2334-sl3-N, 2024-12-12-t84D-b233C-sl3-N, 2024-12-31-t5-b233D-sl3-N
+#> Trips found with maximum at or before minimum point -- potential wrong direction.
+#> Removing the following: 2024-11-22-t325-b2331-sl3-N, 2024-11-25-t803-b2335-sl3-N, 2024-12-05-t60E-b2334-sl3-N, 2024-12-12-t84D-b233C-sl3-N, 2024-12-31-t5-b233D-sl3-N
+#> Trips found with maximum at or before minimum point -- potential wrong direction.
+#> Removing the following: 2024-11-22-t325-b2331-sl3-N, 2024-11-25-t803-b2335-sl3-N, 2024-12-05-t60E-b2334-sl3-N, 2024-12-12-t84D-b233C-sl3-N, 2024-12-31-t5-b233D-sl3-N
+#> Trips found with maximum at or before minimum point -- potential wrong direction.
+#> Removing the following: 2024-11-22-t325-b2331-sl3-N, 2024-11-25-t803-b2335-sl3-N, 2024-12-05-t60E-b2334-sl3-N, 2024-12-12-t84D-b233C-sl3-N, 2024-12-31-t5-b233D-sl3-N
+#> Trips found with maximum at or before minimum point -- potential wrong direction.
+#> Removing the following: 2024-11-22-t325-b2331-sl3-N, 2024-11-25-t803-b2335-sl3-N, 2024-12-05-t60E-b2334-sl3-N, 2024-12-12-t84D-b233C-sl3-N, 2024-12-31-t5-b233D-sl3-N
+#> Trips found with maximum at or before minimum point -- potential wrong direction.
+#> Removing the following: 2024-11-22-t325-b2331-sl3-N, 2024-11-25-t803-b2335-sl3-N, 2024-12-05-t60E-b2334-sl3-N, 2024-12-12-t84D-b233C-sl3-N, 2024-12-31-t5-b233D-sl3-N
+#> Trips found with maximum at or before minimum point -- potential wrong direction.
+#> Removing the following: 2024-11-22-t325-b2331-sl3-N, 2024-11-25-t803-b2335-sl3-N, 2024-12-05-t60E-b2334-sl3-N, 2024-12-12-t84D-b233C-sl3-N, 2024-12-31-t5-b233D-sl3-N
+#> Trips found with maximum at or before minimum point -- potential wrong direction.
+#> Removing the following: 2024-11-22-t325-b2331-sl3-N, 2024-11-25-t803-b2335-sl3-N, 2024-12-05-t60E-b2334-sl3-N, 2024-12-12-t84D-b233C-sl3-N, 2024-12-31-t5-b233D-sl3-N
+#> Trips found with maximum at or before minimum point -- potential wrong direction.
+#> Removing the following: 2024-11-22-t325-b2331-sl3-N, 2024-11-25-t803-b2335-sl3-N, 2024-12-05-t60E-b2334-sl3-N, 2024-12-12-t84D-b233C-sl3-N, 2024-12-31-t5-b233D-sl3-N
+#> Trips found with maximum at or before minimum point -- potential wrong direction.
+#> Removing the following: 2024-11-22-t325-b2331-sl3-N, 2024-11-25-t803-b2335-sl3-N, 2024-12-05-t60E-b2334-sl3-N, 2024-12-12-t84D-b233C-sl3-N, 2024-12-31-t5-b233D-sl3-N
+#> Trips found with maximum at or before minimum point -- potential wrong direction.
+#> Removing the following: 2024-11-22-t325-b2331-sl3-N, 2024-11-25-t803-b2335-sl3-N, 2024-12-05-t60E-b2334-sl3-N, 2024-12-12-t84D-b233C-sl3-N, 2024-12-31-t5-b233D-sl3-N
+step5_df <- step5$result[[1]]
+dur[["5"]] <- step5[,1:8]
 
 # Save changes
-dur <- append(dur,
-              as.numeric(difftime(t_f, t_0, units = "secs")))
 n_obs <- append(n_obs,
                 dim(step5_df)[1])
 n_trips <- append(n_trips,
@@ -408,16 +467,20 @@ First, run the step:
 
 ``` r
 # - Step 6: Trim trip tails -
-t_0 <- Sys.time()
-step6_df <- clean_incomplete_trips(distance_df = step5_df,
-                                   min_trip_distance = min_dist,
-                                   min_trip_duration = min_dur,
-                                   max_distance_gap = max_d_gap)
-t_f <- Sys.time()
+step6 <- bench::mark(
+  # transittraj
+  step6 = clean_incomplete_trips(distance_df = step5_df,
+                                 min_trip_distance = min_dist,
+                                 min_trip_duration = min_dur,
+                                 max_distance_gap = max_d_gap),
+  # benchmark
+  time_unit = "s", check = TRUE, iterations = bench_iter, min_time = Inf
+)
+#> Warning: Some expressions had a GC in every iteration; so filtering is disabled.
+step6_df <- step6$result[[1]]
+dur[["6"]] <- step6[,1:8]
 
 # Save changes
-dur <- append(dur,
-              as.numeric(difftime(t_f, t_0, units = "secs")))
 n_obs <- append(n_obs,
                 dim(step6_df)[1])
 n_trips <- append(n_trips,
@@ -476,15 +539,19 @@ First, run the step:
 
 ``` r
 # - Step 7: Correct monotonicty -
-t_0 <- Sys.time()
-step7_df <- make_monotonic(distance_df = step6_df,
-                           correct_speed = TRUE,
-                           add_distance_error = dist_error)
-t_f <- Sys.time()
+step7 <- bench::mark(
+  # transittraj
+  step7 = make_monotonic(distance_df = step6_df,
+                         correct_speed = TRUE,
+                         add_distance_error = dist_error),
+  # benchmark
+  time_unit = "s", check = TRUE, iterations = bench_iter, min_time = Inf
+)
+#> Warning: Some expressions had a GC in every iteration; so filtering is disabled.
+step7_df <- step7$result[[1]]
+dur[["7"]] <- step7[,1:8]
 
 # Save changes
-dur <- append(dur,
-              as.numeric(difftime(t_f, t_0, units = "secs")))
 n_obs <- append(n_obs,
                 dim(step7_df)[1])
 n_trips <- append(n_trips,
@@ -572,13 +639,17 @@ First, run the step:
 
 ``` r
 # Run
-t_0 <- Sys.time()
-traj <- get_trajectory_fun(distance_df = step7_df)
-t_f <- Sys.time()
+fin <- bench::mark(
+  # transittraj
+  fin = get_trajectory_fun(distance_df = step7_df),
+  # benchmark
+  time_unit = "s", check = TRUE, iterations = bench_iter, min_time = Inf
+)
+#> Warning: Some expressions had a GC in every iteration; so filtering is disabled.
+traj <- fin$result[[1]]
+dur[["Final"]] <- fin[,1:8]
 
 # Get info
-dur <- append(dur,
-              as.numeric(difftime(t_f, t_0, units = "secs")))
 n_obs <- append(n_obs, NA)
 n_trips <- append(n_trips,
                   length(unclass(traj)))
@@ -695,11 +766,15 @@ With all steps complete, we can print our cleaning summary table:
 
 
 ``` r
+dur_df <- bind_rows(dur, .id = "step")
+
 cleaning_summ <- data.frame(step = c("Initial", "1 & 2", "3", "4",
                                      "5", "6", "7", "Final"),
                             n_obs = n_obs,
-                            n_trips = n_trips,
-                            t_sec = dur) %>%
+                            n_trips = n_trips) %>%
+  left_join(y = (dur_df %>%
+                   select(step, median)),
+            by = "step") %>%
   mutate(delta_n = n_obs - lag(n_obs),
          perc_n = delta_n / lag(n_obs) * 100,
          delta_trips = n_trips - lag(n_trips),
@@ -708,7 +783,7 @@ cleaning_summ <- data.frame(step = c("Initial", "1 & 2", "3", "4",
 summ_clean <- cleaning_summ %>%
   mutate(n_obs = format(n_obs, big.mark = ","),
          n_trips = format(n_trips, big.mark = ","),
-         t_sec = round(t_sec, 1),
+         median = round(median, 1),
          delta_n = format(delta_n, big.mark = ","),
          perc_n = round(perc_n, 1),
          delta_trips = format(delta_trips, big.mark = ","),
@@ -723,23 +798,23 @@ summ_clean <- cleaning_summ %>%
          `Change in Observations` = change_obs,
          `Number of Trips` = n_trips,
          `Change in Trips` = change_trips,
-         `Time (s)` = t_sec)
+         `Median Time (s)` = median)
 
 knitr::kable(summ_clean)
 ```
 
 
 
-|Step    |Number of Observations |Number of Trips | Time (s)|Change in Observations |Change in Trips |
-|:-------|:----------------------|:---------------|--------:|:----------------------|:---------------|
-|Initial |1,707,095              |3,256           |       NA|NA (NA%)               |NA (NA%)        |
-|1 & 2   |1,348,250              |3,253           |    239.8|-358,845 (-21%)        |-3 (-0.1%)      |
-|3       |1,345,613              |3,246           |      2.7|-2,637 (-0.2%)         |-7 (-0.2%)      |
-|4       |1,344,129              |3,246           |     56.5|-1,484 (-0.1%)         |0 (0%)          |
-|5       |1,335,074              |3,241           |      0.4|-9,055 (-0.7%)         |-5 (-0.2%)      |
-|6       |1,304,499              |3,100           |      1.2|-30,575 (-2.3%)        |-141 (-4.4%)    |
-|7       |1,304,499              |3,100           |     73.6|0 (0%)                 |0 (0%)          |
-|Final   |NA                     |3,100           |     37.2|NA (NA%)               |0 (0%)          |
+|Step    |Number of Observations |Number of Trips | Median Time (s)|Change in Observations |Change in Trips |
+|:-------|:----------------------|:---------------|---------------:|:----------------------|:---------------|
+|Initial |1,707,095              |3,256           |              NA|NA (NA%)               |NA (NA%)        |
+|1 & 2   |1,348,250              |3,253           |            23.6|-358,845 (-21%)        |-3 (-0.1%)      |
+|3       |1,345,613              |3,246           |             0.9|-2,637 (-0.2%)         |-7 (-0.2%)      |
+|4       |1,344,129              |3,246           |            55.6|-1,484 (-0.1%)         |0 (0%)          |
+|5       |1,335,074              |3,241           |             0.4|-9,055 (-0.7%)         |-5 (-0.2%)      |
+|6       |1,304,499              |3,100           |             1.1|-30,575 (-2.3%)        |-141 (-4.4%)    |
+|7       |1,304,499              |3,100           |            73.3|0 (0%)                 |0 (0%)          |
+|Final   |NA                     |3,100           |            36.5|NA (NA%)               |0 (0%)          |
 
 
 
@@ -749,10 +824,10 @@ Finally, the total time required by the cleaning process, in seconds, is:
 
 
 ``` r
-total_time <- sum(cleaning_summ$t_sec,
+total_time <- sum(cleaning_summ$median,
                   na.rm = TRUE)
 print(total_time)
-#> [1] 411.2275
+#> [1] 191.3807
 ```
 
 
