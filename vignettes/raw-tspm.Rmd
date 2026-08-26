@@ -19,7 +19,7 @@ This vignette is intended to complement our paper. Check out the full paper or t
 
 We've loaded the following data into our RStudio environment for this vignette:
 
-  - `traj`: The reconstructed trajectory objects, as demonstrated in `vignette("articles/jpt-cleaning")`.
+  - `traj`: The reconstructed trajectory objects, as demonstrated in the data cleaning vignette.
 
   - `route_geom`: The Red Line's northbound alignment, as retrieved from IndyGo's GTFS via `transittraj::get_shape_geometry()`.
 
@@ -29,7 +29,7 @@ We've loaded the following data into our RStudio environment for this vignette:
   
 We can begin by loading the packages we'll need:
 
-```{r setup}
+```{r setup, message = FALSE, warning = FALSE}
 # For analysis
 library(transittraj)
 library(tidyverse)
@@ -77,9 +77,12 @@ marquee_label <- function(border = "firebrick") {
   )
   return(lab)
 }
+
+# Benchmark
+bench_iter <- 20
 ```
 
-Let's briefly explore our data. First, we can print a summary of our fit trajectory object `traj`. This tells us that, with the cleaning parameters used in `vignette("articles/jpt-cleaning")`, we have 3100 valid trips. Trajectories were fit using VCHIP-ME interpolating splines.
+Let's briefly explore our data. First, we can print a summary of our fit trajectory object `traj`. This tells us that, with the cleaning parameters used, we have 3100 valid trips. Trajectories were fit using VCHIP-ME interpolating splines.
 
 ``` {r}
 summary(traj)
@@ -139,9 +142,9 @@ sig_enters <- sigs_filt %>%
     name == "Virginia & Woodlawn" ~ distance - 74
   ),
          inout = "Entrance")
+
 # Combine
 sig_bnds <- rbind(sig_enters, sig_exits) %>% arrange(distance)
-
 sigs_sf <- sf::st_line_interpolate(line = route_geom %>% sf::st_as_sfc(),
                                     dist = sigs_NB$distance) %>%
   sf::st_sf() %>%
@@ -161,7 +164,7 @@ stops_sf <- sf::st_line_interpolate(line = route_geom %>% sf::st_as_sfc(),
 We can now check out our bounding points:
 
 ``` {r}
-print(sig_bnds)
+knitr::kable(sig_bnds)
 ```
 
 And we can visualize them along the route alignment:
@@ -243,14 +246,17 @@ ggsave(plot = sigs_map,
        scale = 1.2, fallback_resolution = 1000,
        filename = "C:\\Users\\obrie\\OneDrive - University of Illinois - Urbana\\IndyGo Project\\Deliverables\\Papers\\JPT\\images\\figure_4.pdf", device = cairo_pdf)
 
-ggsave(plot = sigs_map,
-       width = 90, height = 141, units = "mm",
-       scale = 1.2, dpi = 500,
-       filename = "figures/jpt-images/figure_4.png", device = ragg::agg_png)
+suppressWarnings(
+  pdftools::pdf_convert(
+    pdf = "C:\\Users\\obrie\\OneDrive - University of Illinois - Urbana\\IndyGo Project\\Deliverables\\Papers\\JPT\\images\\figure_4.pdf",
+    filenames = "figures/figure_4.png",
+    format = "png", dpi = 500
+  )
+)
 ```
 
-``` {r, echo = FALSE, eval = TRUE, out.width = "60%", dpi = 500}
-knitr::include_graphics(path = "figures/jpt-images/figure_4.pdf")
+``` {r, echo = FALSE, eval = TRUE, out.width = "70%", fig.cap = ""}
+knitr::include_graphics(path = "figures/figure_4.png")
 ```
 
 # Calculation of Performance Metrics
@@ -262,17 +268,22 @@ With our setup of spatial data complete, we can now use `transittraj` to estimat
   - Arrival-on-green, using `predict()`'s `distance_lims` and `timestep` inputs.
   
   - Split failures (SF), using the same `predict()` call as AoG.
+  
+As with the cleaning vignette, we wrap each `predict()` call in `bench::mark()` to record the processing time. We repeat each call 20 times and save its median.
 
 ## Signal Delay
 
 We'll begin with signal delay. For this, we'll simply pass our signal boundings `sig_bnds` to `predict()`. This will calculate the time each trip crossed each row in `sig_bnds`.
 
-``` {r}
-t_0 <- Sys.time()
-sig_crossings <- predict(object = traj,
-                         new_distances = sig_bnds)
-t_f <- Sys.time()
-print(t_f - t_0)
+``` {r crossings}
+bm_crossings <- bench::mark(
+  # transittraj
+  predict(object = traj,
+                           new_distances = sig_bnds),
+  # benchmark
+  time_unit = "s", check = TRUE, iterations = bench_iter, min_time = Inf
+)
+sig_crossings <- bm_crossings$result[[1]]
 ```
 
 Each row of `sig_crossings` will represent each trip's crossing time through each exit and entrance point. If we pivot these rows to separate columns, we can subtract them to estimate each trip's travel time and delay through each signal.
@@ -316,18 +327,21 @@ Each trip's traversal through each signal corresponds to one row. Each traversal
 
 For both of these metric's, we'll want to know how many stops each trip made. We will use the `predict()` method with the `distance_lims` and `timestep` inputs. In `distance_lims` we specify the entire length of the corridor (alternatively, you could run three separate `predict()` calls, with each specifying the bounds of one signal). In `timestep` we specify the temporal resolution of each trip's interpolated points between these distance bounds. Finally, using `deriv = c(0, 1)`, we ask `predict()` to return both the position and speed of each trip at each timepoint. The raw output includes separate rows for the speed and distance calculation at each timepoint; we'll pivot those to separate columns, such that each row corresponds to one timepoint of one trip.
 
-``` {r}
+``` {r interp}
 timestep = 0.1 # seconds
 step_bounds <- c(min(sig_bnds$distance), max(sig_bnds$distance))
 
 # Predict: get distances & speeds
-t_0 <- Sys.time()
-trip_dists <- predict(object = traj,
-                      distance_lims = step_bounds,
-                      timestep = timestep,
-                      deriv = c(0, 1))
-t_f <- Sys.time()
-print(t_f - t_0)
+bm_interp <- bench::mark(
+  # transittraj
+  predict(object = traj,
+                   distance_lims = step_bounds,
+                   timestep = timestep,
+                   deriv = c(0, 1)),
+  # benchmark
+  time_unit = "s", check = TRUE, iterations = bench_iter, min_time = Inf
+)
+trip_dists <- bm_interp$result[[1]]
 
 # Pivot wider: give dist & speed separate columns
 trip_dists_piv <- trip_dists %>%
@@ -403,7 +417,7 @@ head(trip_sig_stops)
 
 This is all the data we need to easily estimate AoG and SF:
 
-``` {r, eval = FALSE, echo = TRUE}
+``` {r}
 # Calculate AOG & SFs by time period
 aog <- trip_sig_stops %>%
   group_by(name) %>%
@@ -421,6 +435,8 @@ split_failures <- trip_sig_stops %>%
 ```
 
 # Results
+
+## Example Trajectories
 
 We now have estimates for each signal's control delay, AoG, and SF over the study period, aggregated over all times of day and days of the week. Before exploring these results, we'll use them to visualize some example trajectories:
 
@@ -642,11 +658,155 @@ ggsave(plot = combo_plot,
        height = 60, width = 190, units = "mm",
        scale = 1.5, fallback_resolution = 1000,
        filename = "C:\\Users\\obrie\\OneDrive - University of Illinois - Urbana\\IndyGo Project\\Deliverables\\Papers\\JPT\\images\\figure_6.pdf", device = cairo_pdf)
+
+suppressWarnings(
+  pdftools::pdf_convert(
+    pdf = "C:\\Users\\obrie\\OneDrive - University of Illinois - Urbana\\IndyGo Project\\Deliverables\\Papers\\JPT\\images\\figure_6.pdf",
+    filenames = "figures/figure_6.png",
+    format = "png", dpi = 500
+  )
+)
 ```
 
-``` {r, echo = FALSE, eval = TRUE, out.width = "60%", dpi = 500}
-knitr::include_graphics(path = "figures/jpt-images/figure_6.pdf")
+``` {r, echo = FALSE, eval = TRUE, out.width = "100%", fig.cap = ""}
+knitr::include_graphics(path = "figures/figure_6.png")
 ```
+
+Another way to visualize these is through animations. For non-technical audiences, these give a better idea of how these different conditions may effect passenger experience. `transittraj` supports two: animated maps and animated lines. For either, we can begin by setting our formatting parameters. See `help(plot_animated_map)` for a more thorough discussion on how this formatting works.
+
+``` {r, eval = FALSE, echo = TRUE}
+anim_df <- rbind(
+  plot_df1 %>%
+    mutate(Type = "No-Stop"),
+  plot_df2 %>%
+    mutate(Type = "One-Stop"),
+  plot_df3 %>%
+    mutate(Type = "Multiple-Stop")
+)
+
+# All features to plot
+plot_features <- rbind(
+  sig_bnds %>%
+    filter(name %in% plot_sig) %>%
+    select(distance) %>%
+    mutate(Feature = "Entrance/Exit"),
+  sigs_NB %>%
+    filter(name %in% plot_sig) %>%
+    select(distance) %>%
+    mutate(Feature = "Stopbar")
+)
+
+# Trips tp plot
+plot_trips <- c(plot_trip1, # No stop
+                plot_trip2, # One stop
+                plot_trip3) # SF
+
+# Formatting
+feat_format <- plot_features %>%
+  mutate(shape = c(4, 4, 20)) %>%
+  select(Feature, shape) %>%
+  distinct(Feature, shape)
+veh_format <- data.frame(Type = c("No-Stop",
+                                  "One-Stop",
+                                  "Multiple-Stop"),
+                         shape = c(21, 24, 25),
+                         outline = c(my_r, my_b, my_g)
+)
+```
+
+``` {r, eval = FALSE, echo = TRUE}
+# Base anim
+map_anim <- plot_animated_map(
+  # Traj data
+  distance_df = anim_df,
+  center_vehicles = TRUE,
+  # Spatial data
+  shape_geometry = route_geom, distance_lims = plot_lims, bbox_expand = 20,
+  background = "osm",
+  # Route formatting
+  route_color = "red4", route_width = 2.7,
+  # Vehicle formatting
+  veh_shape = veh_format, veh_outline = veh_format,
+  veh_stroke = 2.5, veh_alpha = 0.9,
+  # Feature formatting
+  feature_distances = plot_features,
+  feature_outline = "grey50", feature_shape = feat_format,
+  feature_stroke = 2, feature_size = 3
+)
+
+# Extra Formatting
+map_anim <- map_anim +
+  labs(title = "Example Trajectories")
+map_anim
+```
+
+``` {r, eval = FALSE, echo = FALSE}
+gganimate::anim_save(animation = map_anim,
+                     filename = "C:/Users/obrie/OneDrive - University of Illinois - Urbana/IndyGo Project/Deliverables/Papers/JPT/videos/video_1.mp4",
+                     # duration = 3, fps = 3,
+                     duration = 30, fps = 30,
+                     height = 1280, width = 720, units = "px", scaling = 2.5,
+                     renderer = gganimate::av_renderer(),
+                     device = "ragg_png")
+
+av::av_video_images(video = "C:/Users/obrie/OneDrive - University of Illinois - Urbana/IndyGo Project/Deliverables/Papers/JPT/videos/video_1.mp4",
+                    destdir = "C:/Users/obrie/OneDrive - University of Illinois - Urbana/IndyGo Project/Deliverables/Papers/JPT/videos/video_1_thumbnail.",
+                    format = "png",
+                    trim = "3:4")
+```
+
+``` {r, echo = FALSE}
+vembedr::embed_url("https://www.youtube.com/watch?v=hCGx4Ki3GRM") %>%
+  use_align("center")
+```
+
+``` {r, eval = FALSE, echo = TRUE}
+# Base anim
+line_anim <- plot_animated_line(
+  # Traj data
+  distance_df = anim_df,
+  center_vehicles = TRUE,
+  # Spatial data
+  distance_lims = plot_lims,
+  # Route formatting
+  route_color = "red4", route_width = 2.7,
+  # Vehicle formatting
+  veh_shape = veh_format, veh_outline = veh_format,
+  veh_stroke = 2.5, veh_alpha = 0.9,
+  # Feature formatting
+  feature_distances = plot_features,
+  feature_outline = "grey50", feature_shape = feat_format,
+  feature_stroke = 2, feature_size = 3
+)
+
+# Extra Formatting
+line_anim <- line_anim +
+  labs(title = "Example Trajectories",
+       y = "Distance (m)")
+line_anim
+```
+
+``` {r, eval = FALSE, echo = FALSE}
+gganimate::anim_save(animation = line_anim,
+                     filename = "C:/Users/obrie/OneDrive - University of Illinois - Urbana/IndyGo Project/Deliverables/Papers/JPT/videos/video_2.mp4",
+                     # duration = 3, fps = 3,
+                     duration = 30, fps = 30,
+                     height = 1280, width = 720, units = "px", scaling = 2.5,
+                     renderer = gganimate::av_renderer(),
+                     device = "ragg_png")
+
+av::av_video_images(video = "C:/Users/obrie/OneDrive - University of Illinois - Urbana/IndyGo Project/Deliverables/Papers/JPT/videos/video_2.mp4",
+                    destdir = "C:/Users/obrie/OneDrive - University of Illinois - Urbana/IndyGo Project/Deliverables/Papers/JPT/videos/video_2_thumbnail",
+                    format = "png",
+                    trim = "3:4")
+```
+
+``` {r, echo = FALSE}
+vembedr::embed_url("https://www.youtube.com/watch?v=60AkEtYd9O0") %>%
+  use_align("center")
+```
+
+## Performance Metrics
 
 Next we'll generate some plots visualizing the metrics aggregated by signal. We'll generate violin plots to show the distribution of signal delays, and column charts to visualize the portion of AoG and SF:
 
@@ -782,7 +942,7 @@ combo_plot <- delay_violins + aog_bar + sf_bar +
 combo_plot
 ```
 
-``` {r, eval = FALSE, include = FASE}
+``` {r, eval = FALSE, include = FALSE}
 ggsave(plot = combo_plot,
        height = 75, width = 190, units = "mm",
        scale = 1.5, fallback_resolution = 1000,
@@ -797,13 +957,25 @@ suppressWarnings(
 )
 ```
 
-``` {r, echo = FALSE, eval = TRUE, out.width = "60%", dpi = 500}
+``` {r, echo = FALSE, eval = TRUE, out.width = "100%", fig.cap = ""}
 knitr::include_graphics(path = "figures/figure_7.png")
+```
+
+## Performance
+
+The final relevant component will be computation time required for each of the two `predict()` calls. These are stored in the benchmarking objects:
+
+``` {r}
+# Time for signal delay interp
+print(bm_crossings)
+
+# Time for AoG/SF stepped interp
+print(bm_interp)
 ```
 
 ``` {r, eval = FALSE, echo = FALSE}
 # - Knit -
-knitr::knit(input = "vignettes/raw-cleaning.Rmd",
-            output = "vignettes/cleaning.md")
+knitr::knit(input = "vignettes/raw-tspm.Rmd",
+            output = "vignettes/tspm.md")
 ```
 
