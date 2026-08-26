@@ -269,7 +269,7 @@ With our setup of spatial data complete, we can now use `transittraj` to estimat
   
   - Split failures (SF), using the same `predict()` call as AoG.
   
-As with the cleaning vignette, we wrap each `predict()` call in `bench::mark()` to record the processing time. We repeat each call 20 times and save its median.
+As with the cleaning vignette, we wrap each `predict()` call in `bench::mark()` to record the processing time. We repeat each call 20 times and report the median processing time.
 
 ## Signal Delay
 
@@ -279,7 +279,7 @@ We'll begin with signal delay. For this, we'll simply pass our signal boundings 
 bm_crossings <- bench::mark(
   # transittraj
   predict(object = traj,
-                           new_distances = sig_bnds),
+          new_distances = sig_bnds),
   # benchmark
   time_unit = "s", check = TRUE, iterations = bench_iter, min_time = Inf
 )
@@ -335,9 +335,9 @@ step_bounds <- c(min(sig_bnds$distance), max(sig_bnds$distance))
 bm_interp <- bench::mark(
   # transittraj
   predict(object = traj,
-                   distance_lims = step_bounds,
-                   timestep = timestep,
-                   deriv = c(0, 1)),
+          distance_lims = step_bounds,
+          timestep = timestep,
+          deriv = c(0, 1)),
   # benchmark
   time_unit = "s", check = TRUE, iterations = bench_iter, min_time = Inf
 )
@@ -714,6 +714,8 @@ veh_format <- data.frame(Type = c("No-Stop",
 )
 ```
 
+Next, we'll call `plot_animated_map()` to generate our animation object. Before rendering the vignette, we've uploaded the output video to YouTube and embedded it below.
+
 ``` {r, eval = FALSE, echo = TRUE}
 # Base anim
 map_anim <- plot_animated_map(
@@ -757,8 +759,10 @@ av::av_video_images(video = "C:/Users/obrie/OneDrive - University of Illinois - 
 
 ``` {r, echo = FALSE}
 vembedr::embed_url("https://www.youtube.com/watch?v=hCGx4Ki3GRM") %>%
-  use_align("center")
+  vembedr::use_align("center")
 ```
+
+Finally, we'll generate an animated line using `plot_animated_line()`. We can use the same formatting parameters defined above.
 
 ``` {r, eval = FALSE, echo = TRUE}
 # Base anim
@@ -803,7 +807,7 @@ av::av_video_images(video = "C:/Users/obrie/OneDrive - University of Illinois - 
 
 ``` {r, echo = FALSE}
 vembedr::embed_url("https://www.youtube.com/watch?v=60AkEtYd9O0") %>%
-  use_align("center")
+  vembedr::use_align("center")
 ```
 
 ## Performance Metrics
@@ -963,13 +967,13 @@ knitr::include_graphics(path = "figures/figure_7.png")
 
 ## Performance
 
-The final relevant component will be computation time required for each of the two `predict()` calls. These are stored in the benchmarking objects:
+The final relevant component is the computation time required for each of the two `predict()` calls. These are stored in the benchmarking objects:
 
 ``` {r}
-# Time for signal delay interp
+# Time for signal delay interp (seconds)
 print(bm_crossings)
 
-# Time for AoG/SF stepped interp
+# Time for AoG/SF stepped interp (seconds)
 print(bm_interp)
 ```
 

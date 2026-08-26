@@ -6,7 +6,7 @@ Today's public transit vehicles produce a large amount of automatic
 vehicle location (AVL) data. This data is very useful for planning and
 performance studies, but can be noisy, error-prone, and sparse. 
 We present `transittraj`, an R package which cleans AVL point data and reconstructs
-continuous, differentiable, monotonic, and vertible vehicle trajectory functions.
+continuous, differentiable, monotonic, and invertible vehicle trajectory functions.
 
 <img src="vignettes/figures/figure_1.png" alt="Example `transittraj` trajectory." width="80%" />
 
@@ -40,10 +40,7 @@ into three `markdown` vignettes, all stored in [`/vignettes`](vignettes/):
   
 Each `markdown` file contains the code used, the output (figures, tables, and text)
 of that code, and annotations describing the code. Thorough discussions of the
-results are presneted in our paper. In addition to the rendered files, each
+results are presented in our paper. In addition to the rendered ("knit") files, each
 vignette has a un-rendered `Rmarkdown` file in [`/vignettes`](vignettes/).
-These include all raw code chunks (including those hidden in the final
-vignettes). Finally, all high-resolution raster (PNG) versions of the final
-graphics are saved in [`/vignettes/figures`](vignettes/figures/).
-
-
+These include all raw code chunks, including those hidden in the knit
+vignettes.
