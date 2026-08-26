@@ -287,7 +287,7 @@ With our setup of spatial data complete, we can now use `transittraj` to estimat
   
   - Split failures (SF), using the same `predict()` call as AoG.
   
-As with the cleaning vignette, we wrap each `predict()` call in `bench::mark()` to record the processing time. We repeat each call 20 times and save its median.
+As with the cleaning vignette, we wrap each `predict()` call in `bench::mark()` to record the processing time. We repeat each call 20 times and report the median processing time.
 
 ## Signal Delay
 
@@ -298,7 +298,7 @@ We'll begin with signal delay. For this, we'll simply pass our signal boundings 
 bm_crossings <- bench::mark(
   # transittraj
   predict(object = traj,
-                           new_distances = sig_bnds),
+          new_distances = sig_bnds),
   # benchmark
   time_unit = "s", check = TRUE, iterations = bench_iter, min_time = Inf
 )
@@ -367,9 +367,9 @@ step_bounds <- c(min(sig_bnds$distance), max(sig_bnds$distance))
 bm_interp <- bench::mark(
   # transittraj
   predict(object = traj,
-                   distance_lims = step_bounds,
-                   timestep = timestep,
-                   deriv = c(0, 1)),
+          distance_lims = step_bounds,
+          timestep = timestep,
+          deriv = c(0, 1)),
   # benchmark
   time_unit = "s", check = TRUE, iterations = bench_iter, min_time = Inf
 )
@@ -757,6 +757,8 @@ veh_format <- data.frame(Type = c("No-Stop",
 )
 ```
 
+Next, we'll call `plot_animated_map()` to generate our animation object. Before rendering the vignette, we've uploaded the output video to YouTube and embedded it below.
+
 
 ``` r
 # Base anim
@@ -786,11 +788,13 @@ map_anim
 
 
 
+<!--html_preserve--><div class="vembedr" align="center">
+<div>
+<iframe src="https://www.youtube.com/embed/hCGx4Ki3GRM" width="533" height="300" frameborder="0" allowfullscreen="" data-external="1"></iframe>
+</div>
+</div><!--/html_preserve-->
 
-```
-#> Error in `use_align()`:
-#> ! could not find function "use_align"
-```
+Finally, we'll generate an animated line using `plot_animated_line()`. We can use the same formatting parameters defined above.
 
 
 ``` r
@@ -821,11 +825,11 @@ line_anim
 
 
 
-
-```
-#> Error in `use_align()`:
-#> ! could not find function "use_align"
-```
+<!--html_preserve--><div class="vembedr" align="center">
+<div>
+<iframe src="https://www.youtube.com/embed/60AkEtYd9O0" width="533" height="300" frameborder="0" allowfullscreen="" data-external="1"></iframe>
+</div>
+</div><!--/html_preserve-->
 
 ## Performance Metrics
 
@@ -970,24 +974,24 @@ combo_plot
 
 ## Performance
 
-The final relevant component will be computation time required for each of the two `predict()` calls. These are stored in the benchmarking objects:
+The final relevant component is the computation time required for each of the two `predict()` calls. These are stored in the benchmarking objects:
 
 
 ``` r
-# Time for signal delay interp
+# Time for signal delay interp (seconds)
 print(bm_crossings)
 #> # A tibble: 1 × 13
 #>   expression            min median `itr/sec` mem_alloc `gc/sec` n_itr  n_gc total_time result
 #>   <bch:expr>          <dbl>  <dbl>     <dbl> <bch:byt>    <dbl> <int> <dbl>      <dbl> <list>
-#> 1 predict(object = t…  4.20   4.37     0.226    5.96MB     1.13    20   100       88.5 <df>  
+#> 1 predict(object = t…  3.33   3.38     0.293    5.96MB     1.38    20    94       68.3 <df>  
 #> # ℹ 3 more variables: memory <list>, time <list>, gc <list>
 
-# Time for AoG/SF stepped interp
+# Time for AoG/SF stepped interp (seconds)
 print(bm_interp)
 #> # A tibble: 1 × 13
 #>   expression          min median `itr/sec` mem_alloc `gc/sec` n_itr  n_gc total_time result  
 #>   <bch:expr>        <dbl>  <dbl>     <dbl> <bch:byt>    <dbl> <int> <dbl>      <dbl> <list>  
-#> 1 predict(object =…  71.3   72.0    0.0139     636MB    0.973    20  1402      1440. <tibble>
+#> 1 predict(object =…  71.7   72.4    0.0137     636MB    0.958    20  1400      1461. <tibble>
 #> # ℹ 3 more variables: memory <list>, time <list>, gc <list>
 ```
 
