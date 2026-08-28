@@ -757,10 +757,8 @@ av::av_video_images(video = "C:/Users/obrie/OneDrive - University of Illinois - 
                     trim = "3:4")
 ```
 
-``` {r, echo = FALSE}
-vembedr::embed_url("https://www.youtube.com/watch?v=hCGx4Ki3GRM") %>%
-  vembedr::use_align("center")
-```
+https://github.com/user-attachments/assets/253bc04c-4efa-4dab-bb15-6ebed713114e
+
 
 Finally, we'll generate an animated line using `plot_animated_line()`. We can use the same formatting parameters defined above.
 
@@ -805,10 +803,7 @@ av::av_video_images(video = "C:/Users/obrie/OneDrive - University of Illinois - 
                     trim = "3:4")
 ```
 
-``` {r, echo = FALSE}
-vembedr::embed_url("https://www.youtube.com/watch?v=60AkEtYd9O0") %>%
-  vembedr::use_align("center")
-```
+https://github.com/user-attachments/assets/469c608d-c020-417d-8a7b-14d08fdcc4e1
 
 ## Performance Metrics
 
