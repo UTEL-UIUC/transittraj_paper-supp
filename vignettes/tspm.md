@@ -823,13 +823,7 @@ line_anim <- line_anim +
 line_anim
 ```
 
-
-
-<!--html_preserve--><div class="vembedr" align="center">
-<div>
-<iframe src="https://www.youtube.com/embed/60AkEtYd9O0" width="533" height="300" frameborder="0" allowfullscreen="" data-external="1"></iframe>
-</div>
-</div><!--/html_preserve-->
+https://github.com/user-attachments/assets/469c608d-c020-417d-8a7b-14d08fdcc4e1
 
 ## Performance Metrics
 
