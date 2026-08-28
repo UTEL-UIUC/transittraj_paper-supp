@@ -786,13 +786,7 @@ map_anim <- map_anim +
 map_anim
 ```
 
-
-
-<!--html_preserve--><div class="vembedr" align="center">
-<div>
-<iframe src="https://www.youtube.com/embed/hCGx4Ki3GRM" width="533" height="300" frameborder="0" allowfullscreen="" data-external="1"></iframe>
-</div>
-</div><!--/html_preserve-->
+https://github.com/user-attachments/assets/253bc04c-4efa-4dab-bb15-6ebed713114e
 
 Finally, we'll generate an animated line using `plot_animated_line()`. We can use the same formatting parameters defined above.
 
