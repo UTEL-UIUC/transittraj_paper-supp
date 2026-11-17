@@ -34,6 +34,8 @@ library(tidyverse)
 library(marquee)
 library(patchwork)
 library(ggspatial)
+library(ggbeeswarm)
+library(scales)
 ```
 
 
@@ -63,6 +65,8 @@ marquee_label <- function(border = "firebrick") {
 
 # Benchmark
 bench_iter <- 20
+bm <- list()
+bm_times <- list()
 ```
 
 Let's briefly explore our data. First, we can print a summary of our fit trajectory object `traj`. This tells us that, with the cleaning parameters used, we have 3100 valid trips. Trajectories were fit using VCHIP-ME interpolating splines.
@@ -74,7 +78,7 @@ summary(traj)
 #> AVL Group Trajectory Object
 #> ------
 #> Number of trips: 3100
-#> Total distance range: 0 to 20499.99
+#> Total distance range: -0.1125 to 20499.99
 #> Total time range: 1730433602 to 1735707538
 #> ------
 #> Trajectory function present: TRUE
@@ -303,7 +307,18 @@ bm_crossings <- bench::mark(
   time_unit = "s", check = TRUE, iterations = bench_iter, min_time = Inf
 )
 #> Warning: Some expressions had a GC in every iteration; so filtering is disabled.
+
+# Benchmarking
 sig_crossings <- bm_crossings$result[[1]]
+bm[["Inverse Crossings"]] <- data.frame(
+  min_t = bm_crossings$min,
+  med_t = bm_crossings$median,
+  mem_alloc = as.character(bm_crossings$mem_alloc),
+  ngc = bm_crossings$n_gc
+)
+bm_times[["Inverse Crossings"]] <- data.frame(
+  t = as.numeric(bm_crossings$time[[1]])
+)
 ```
 
 Each row of `sig_crossings` will represent each trip's crossing time through each exit and entrance point. If we pivot these rows to separate columns, we can subtract them to estimate each trip's travel time and delay through each signal.
@@ -323,7 +338,6 @@ sig_ff <- sig_tt %>%
   group_by(name) %>%
   summarize(min_tt = min(travel_time),
             max_tt = max(travel_time),
-            tt_85th = quantile(travel_time, 0.85),
             free_flow = quantile(travel_time, 0.05),
             mean_tt = mean(travel_time),
             std_tt = sd(travel_time),
@@ -342,14 +356,14 @@ Let's see what this look like:
 ``` r
 head(sig_delay)
 #> # A tibble: 6 × 7
-#>   trip_id_performed           name               Entrance    Exit travel_time free_flow delay
-#>   <chr>                       <chr>                 <dbl>   <dbl>       <dbl>     <dbl> <dbl>
-#> 1 2024-10-31-t19-b233E-sl3-N  Shelby & Morris 1730435778.  1.73e9       31.3       7.38 23.9 
-#> 2 2024-10-31-t2D-b233A-sl3-N  Shelby & Morris 1730436767.  1.73e9       13.0       7.38  5.64
-#> 3 2024-10-31-t5-b233D-sl3-N   Shelby & Morris 1730434557.  1.73e9       17.4       7.38  9.98
-#> 4 2024-11-01-t19-b233E-sl3-N  Shelby & Morris 1730522390.  1.73e9       48.9       7.38 41.5 
-#> 5 2024-11-01-t1FC-b232C-sl3-N Shelby & Morris 1730452895.  1.73e9       93.4       7.38 86.0 
-#> 6 2024-11-01-t20B-b232D-sl3-N Shelby & Morris 1730453492.  1.73e9        7.04      7.38  0
+#>   trip_id_performed           name               Entrance        Exit travel_time free_flow delay
+#>   <chr>                       <chr>                 <dbl>       <dbl>       <dbl>     <dbl> <dbl>
+#> 1 2024-10-31-t19-b233E-sl3-N  Shelby & Morris 1730435778. 1730435810.       31.3       7.38 23.9 
+#> 2 2024-10-31-t2D-b233A-sl3-N  Shelby & Morris 1730436767. 1730436780.       13.0       7.38  5.64
+#> 3 2024-10-31-t5-b233D-sl3-N   Shelby & Morris 1730434557. 1730434574.       17.4       7.38  9.98
+#> 4 2024-11-01-t19-b233E-sl3-N  Shelby & Morris 1730522390. 1730522439.       48.9       7.38 41.5 
+#> 5 2024-11-01-t1FC-b232C-sl3-N Shelby & Morris 1730452895. 1730452988.       93.4       7.38 86.0 
+#> 6 2024-11-01-t20B-b232D-sl3-N Shelby & Morris 1730453492. 1730453499.        7.04      7.38  0
 ```
 
 Each trip's traversal through each signal corresponds to one row. Each traversal has a travel time, free-flow time, and estimated control delay. The free-flow time is dependent only upon the signal, and is the same for all trips through the same signal.
@@ -374,7 +388,18 @@ bm_interp <- bench::mark(
   time_unit = "s", check = TRUE, iterations = bench_iter, min_time = Inf
 )
 #> Warning: Some expressions had a GC in every iteration; so filtering is disabled.
+
+# Benchmarking
 trip_dists <- bm_interp$result[[1]]
+bm[["Bounded Steps"]] <- data.frame(
+  min_t = bm_interp$min,
+  med_t = bm_interp$median,
+  mem_alloc = as.character(bm_interp$mem_alloc),
+  ngc = bm_interp$n_gc
+)
+bm_times[["Bounded Steps"]] <- data.frame(
+  t = as.numeric(bm_interp$time[[1]])
+)
 
 # Pivot wider: give dist & speed separate columns
 trip_dists_piv <- trip_dists %>%
@@ -411,7 +436,7 @@ With this dataframe, we'll identify segments where each trip is stopped. We'll c
 
 ``` r
 # Set up RLE
-stop_cutoff <- 1.341 # m/s, roughly 3 mph
+stop_cutoff <- 3 / 2.237 # mph -> m/s
 stopped_rle_fun <- function(is_stopped, trip_id_performed) {
   rle_obj <- rle(x = is_stopped)
   out_vec <- rep(x = seq_along(rle_obj$values), times = rle_obj$length)
@@ -593,24 +618,23 @@ stop_df2 <- trip_events %>%
          y = sig_bounds[2] - 60)
 
 del_plot <- ggplot() +
+  geom_rect(data = stop_df2,
+            aes(xmin = time_begin, xmax = time_end,
+                ymin = -Inf, ymax = Inf),
+            color = NULL, fill = my_r, alpha = 0.2) +
   geom_hline(aes(yintercept = sig_bounds, linetype = "Entrance/Exit"),
              color = "grey50", linewidth = 0.6) +
   geom_hline(data = stopbars_filt,
              aes(yintercept = distance, linetype = "Stopbar"),
              linewidth = 0.8, color = "grey50") +
-  geom_vline(data = stop_df2,
-             aes(xintercept = time_begin),
-             color = "firebrick", linewidth = 1, linetype = "dotdash") +
-  geom_vline(data = stop_df2,
-             aes(xintercept = time_end),
-             color = "firebrick", linewidth = 1, linetype = "dotdash") +
   geom_line(data = plot_df2,
             aes(x = event_timestamp, y = distance, color = speed),
             linewidth = 3) +
   geom_segment(data = stop_df2,
                aes(x = time_begin, xend = time_end,
                    y = y + 15, yend = y + 15),
-               arrow = arrow(ends = "both", type = "closed", length = unit(0.025, units = "npc")),
+               arrow = arrow(ends = "both", type = "closed",
+                             length = unit(0.025, units = "npc")),
                color = "firebrick", linetype = "solid", linewidth = 0.7) +
   geom_marquee(data = stop_df2,
                aes(x = x, y = y - 8, label = lab),
@@ -653,11 +677,12 @@ stop_df3 <- trip_events %>%
             by = c("trip_id_performed", "name")) %>%
   mutate(time_elapsed = round(time_elapsed, 1),
          delay = round(delay, 1),
+         r = as.character(row_number()),
          lab = case_when(
-           row_number() == 1 ~ paste("*Stop ", row_number(), "*  \n",
+           r == "1" ~ paste("*Stop ", row_number(), "*  \n",
                                      "**Duration**: ", time_elapsed, " s",
                                      sep = ""),
-           row_number() == 2 ~ paste("*Stop ", row_number(), "*  \n",
+           r == "2" ~ paste("*Stop ", row_number(), "*  \n",
                                      "**Duration**: ", time_elapsed, " s  \n",
                                      "**Total Delay**: ", delay, " s",
                                      sep = "")
@@ -666,14 +691,13 @@ stop_df3 <- trip_events %>%
          y = c(sig_bounds[2] - 82, sig_bounds[2] - 65))
 
 sf_plot <- ggplot() +
+  geom_rect(data = stop_df3,
+            aes(xmin = time_begin, xmax = time_end,
+                ymin = -Inf, ymax = Inf,
+                group = r),
+            color = NULL, fill = my_r, alpha = 0.2) +
   geom_hline(aes(yintercept = sig_bounds, linetype = "Entrance/Exit"),
              color = "grey50", linewidth = 0.6) +
-  geom_vline(data = stop_df3,
-             aes(xintercept = time_begin),
-             color = "firebrick", linewidth = 1, linetype = "dotdash") +
-  geom_vline(data = stop_df3,
-             aes(xintercept = time_end),
-             color = "firebrick", linewidth = 1, linetype = "dotdash") +
   geom_hline(data = stopbars_filt,
              aes(yintercept = distance, linetype = "Stopbar"),
              linewidth = 0.8, color = "grey50") +
@@ -786,6 +810,8 @@ map_anim <- map_anim +
 map_anim
 ```
 
+
+
 https://github.com/user-attachments/assets/253bc04c-4efa-4dab-bb15-6ebed713114e
 
 Finally, we'll generate an animated line using `plot_animated_line()`. We can use the same formatting parameters defined above.
@@ -816,6 +842,8 @@ line_anim <- line_anim +
        y = "Distance (m)")
 line_anim
 ```
+
+
 
 https://github.com/user-attachments/assets/469c608d-c020-417d-8a7b-14d08fdcc4e1
 
@@ -969,19 +997,357 @@ The final relevant component is the computation time required for each of the tw
 # Time for signal delay interp (seconds)
 print(bm_crossings)
 #> # A tibble: 1 × 13
-#>   expression            min median `itr/sec` mem_alloc `gc/sec` n_itr  n_gc total_time result
-#>   <bch:expr>          <dbl>  <dbl>     <dbl> <bch:byt>    <dbl> <int> <dbl>      <dbl> <list>
-#> 1 predict(object = t…  3.33   3.38     0.293    5.96MB     1.38    20    94       68.3 <df>  
-#> # ℹ 3 more variables: memory <list>, time <list>, gc <list>
+#> Warning in deparse(x, width.cutoff = width): invalid 'cutoff' value for 'deparse', using default
+#>   expression                                         min median `itr/sec` mem_alloc `gc/sec` n_itr  n_gc total_time result            memory                  time            gc               
+#>   <bch:expr>                                       <dbl>  <dbl>     <dbl> <bch:byt>    <dbl> <int> <dbl>      <dbl> <list>            <list>                  <list>          <list>           
+#> 1 predict(object = traj, new_distances = sig_bnds)  3.21   3.25     0.305    6.08MB     2.02    20   132       65.5 <df [17,844 × 5]> <Rprofmem [93,489 × 3]> <bench_tm [20]> <tibble [20 × 3]>
 
 # Time for AoG/SF stepped interp (seconds)
 print(bm_interp)
 #> # A tibble: 1 × 13
-#>   expression          min median `itr/sec` mem_alloc `gc/sec` n_itr  n_gc total_time result  
-#>   <bch:expr>        <dbl>  <dbl>     <dbl> <bch:byt>    <dbl> <int> <dbl>      <dbl> <list>  
-#> 1 predict(object =…  71.7   72.4    0.0137     636MB    0.958    20  1400      1461. <tibble>
-#> # ℹ 3 more variables: memory <list>, time <list>, gc <list>
+#> Warning in deparse(x, width.cutoff = width): invalid 'cutoff' value for 'deparse', using default
+#>   expression                                                                                   min median `itr/sec` mem_alloc `gc/sec` n_itr  n_gc total_time result                   memory                   time            gc               
+#>   <bch:expr>                                                                                 <dbl>  <dbl>     <dbl> <bch:byt>    <dbl> <int> <dbl>      <dbl> <list>                   <list>                   <list>          <list>           
+#> 1 predict(object = traj, distance_lims = step_bounds, timestep = timestep,  deriv = c(0, 1))  71.3   72.0    0.0139     681MB     1.32    20  1900      1439. <tibble [4,626,102 × 4]> <Rprofmem [123,468 × 3]> <bench_tm [20]> <tibble [20 × 3]>
 ```
 
+# Full Benchmarking Results
+
+In this section, we'll summarize the full benchmarking results, included in Appendix B of the paper.
+
+## Table
+
+We'll create a table summarizing the important information included in each `bench::mark` object:
+
+
+``` r
+bm_tab <- bind_rows(bm, .id = "Interpolation Type")
+bm_clean <- bm_tab %>%
+  mutate(min_t = sprintf(min_t, fmt = "%.2f"),
+         med_t = sprintf(med_t, fmt = "%.2f")) %>%
+  rename(`Minimum` = min_t,
+         `Median` = med_t,
+         `Memory Allocation` = mem_alloc,
+         `Number of Garbage Collections` = ngc)
+
+knitr::kable(bm_clean)
+```
+
+
+
+|Interpolation Type |Minimum |Median |Memory Allocation | Number of Garbage Collections|
+|:------------------|:-------|:------|:-----------------|-----------------------------:|
+|Inverse Crossings  |3.21    |3.25   |6.08MB            |                           132|
+|Bounded Steps      |71.33   |71.99  |681MB             |                          1900|
+
+
+
+
+
+## Visualiation
+
+Finally, below we plot the distribution of individual iterations' processing times:
+
+
+``` r
+bm_times_df <- bind_rows(bm_times, .id = "Interpolation Type")
+
+bm_plot <- ggplot(data = bm_times_df) +
+  geom_beeswarm(aes(x = t, y = `Interpolation Type`,
+                    color = "Iteration", shape = "Iteration"),
+                method = "center",
+                size = 2.3, alpha = 0.6) +
+  geom_point(data = bm_tab,
+             aes(x = med_t, y = `Interpolation Type`,
+                 color = "Median", shape = "Median"),
+             size = 3.2, alpha = 1) +
+  scale_color_manual(name = NULL,
+                     values = c("Iteration" = my_r,
+                                "Median" = my_b)) +
+  scale_shape_manual(name = NULL,
+                     values = c("Iteration" = 20,
+                                "Median" = 15)) +
+  theme_minimal() +
+  labs(x = "Time (s)",
+       y = "Interpolation Type")
+```
+
+
+```
+#> Orientation inferred to be along y-axis; override with `position_beeswarm(orientation = 'x')`
+#> Warning: In `position_beeswarm`, method `center` discretizes the data axis (a.k.a the continuous or non-grouped axis).
+#> This may result in changes to the position of the points along that axis, proportional to the value of `cex`.
+#> To prevent this behavior, set `preserve.data.axis=TRUE`.
+#> This warning is displayed once per session.
+#> Orientation inferred to be along y-axis; override with `position_beeswarm(orientation = 'x')`
+```
+
+<img src="figures/figure_B2.png" alt="" width="100%" />
+
+# Sensitivity Analysis
+
+Our analysis included two tuning parameters: (1) the quantile defining "free-flow travel time", and (2) the stopping speed threshold. In this section, we evaluate the sensitivity of our results to these paramters.
+
+## Signal Delay
+
+We can re-use the previous interpolation `predict()` call here; we just have to analyze the crossing times differently. Below we test a set of quantiles, ranging from the absolute minimum to the 15th-percentile, to define as free-flow:
+
+
+``` r
+test_ff_quantiles <- c(0, # absolute minimum
+                       0.01, 0.025,
+                       0.05, # used in paper
+                       0.1, 0.15)
+
+ff_res <- list()
+del_res <- list()
+for (q in test_ff_quantiles) {
+  
+  # Calculate signal free-flow times
+  ff <- sig_tt %>%
+    group_by(name) %>%
+    summarize(free_flow = quantile(travel_time, q))
+  
+  # Calculate signal delays
+  del <- sig_tt %>%
+    left_join(y = (ff %>% select(name, free_flow)),
+              by = "name") %>%
+    mutate(delay = pmax(0, travel_time - free_flow))
+  
+  # Save results
+  ff_res[[as.character(q)]] <- ff
+  del_res[[as.character(q)]] <- del
+}
+
+# Bind rows together
+q_lev <- c("Minimum", "1.0%", "2.5%", "5.0%", "10.0%", "15.0%")
+ff_df <- bind_rows(ff_res, .id = "q") %>%
+  mutate(q = scales::percent(as.numeric(q),
+                             accuracy = 0.1),
+         q = if_else(q == "0.0%",
+                     true = "Minimum",
+                     false = q),
+         q = factor(q, levels = q_lev),
+         ff_lab = sprintf(free_flow, fmt = "%.1f"))
+del_df <- bind_rows(del_res, .id = "q") %>%
+  mutate(q = scales::percent(as.numeric(q),
+                             accuracy = 0.1),
+         q = if_else(q == "0.0%",
+                     true = "Minimum",
+                     false = q),
+         q = factor(q, levels = q_lev))
+
+```
+
+And now we plot these:
+
+
+``` r
+p_ff <- ggplot(data = ff_df,
+               aes(x = name, y = free_flow,
+                   group = q, fill = q, color = q)) +
+  geom_col(alpha = 0.8, linewidth = 0.6,
+           position = position_dodge(width = 0.9)) +
+  geom_text(aes(label = ff_lab),
+            size = 2.5,
+            position = position_dodge(width = 0.9),
+            vjust = -0.5,
+            show.legend = FALSE) +
+  scale_fill_viridis_d(name = "Free-Flow\nPercentile") +
+  scale_color_viridis_d(name = "Free-Flow\nPercentile") +
+  theme_minimal() +
+  labs(title = "(A) Free-Flow Travel Times",
+       x = "Signal",
+       y = "Free-Flow Travel Time (s)") +
+  theme(plot.title.position = "plot")
+
+p_del <- ggplot(data = del_df) +
+  geom_violin(aes(x = name, y = delay,
+                  fill = q, color = q),
+              alpha = 0.8, linewidth = 0.6,
+              position = "dodge") +
+  scale_fill_viridis_d(name = "Free-Flow\nPercentile") +
+  scale_color_viridis_d(name = "Free-Flow\nPercentile") +
+  ylim(c(0, 100)) +
+  theme_minimal() +
+  labs(title = "(B) Delay Distribution",
+       x = "Signal",
+       y = "Delay (s)") +
+  theme(plot.title.position = "plot")
+
+p_ff_sens <- p_ff + p_del +
+  plot_layout(ncol = 2, nrow = 1,
+              axis_titles = "collect", axes = "collect",
+              guides = "collect")
+p_ff_sens
+```
+
+
+
+<img src="figures/figure_C1.png" alt="" width="100%" />
+
+## Aog & SF
+
+Next, we similarly re-calculate AoG and SF using a variety of speed cutoffs, ranging from near-zero (0.1 mph) to 10 mph.
+
+
+``` r
+test_speeds <- c(0.1, # representing "near-zero"
+                 1,
+                 3,
+                 5, 7, 10) / 2.237 # mph -> m/s
+
+metrics_res <- list()
+for (s in test_speeds) {
+  
+  # get distinct stopped periods, based on s
+  stops <- trip_dists_piv %>%
+    left_join(y = sig_bnds_join,
+              join_by(distance >= Entrance, distance <= Exit)) %>%
+    select(-c(Entrance, Exit)) %>%
+    filter(!is.na(name)) %>%
+    mutate(is_stopped = as.numeric(speed < s)) %>%
+    arrange(trip_id_performed, event_timestamp) %>%
+    group_by(trip_id_performed, name) %>%
+    mutate(run_index = stopped_rle_fun(is_stopped = is_stopped),
+           run_id = paste(trip_id_performed, name, run_index,
+                          sep = "-")) %>%
+    ungroup()
+  
+  # summarize distinct events
+  events <- stops %>%
+    group_by(name, run_id) %>%
+    summarize(trip_id_performed = first(trip_id_performed),
+              is_stopped = max(is_stopped),
+              .groups = "keep")
+  
+  # summarize trips through signals
+  sig_stops <- events %>%
+    group_by(name, trip_id_performed) %>%
+    summarize(num_stops = sum(is_stopped),
+              .groups = "keep") %>%
+    mutate(makes_stop = as.numeric(num_stops > 0),
+           makes_multiple_stops = as.numeric(num_stops > 1))
+  
+  # signal metrics
+  metrics <- sig_stops %>%
+    group_by(name) %>%
+    summarize(num_trips = n(),
+              num_stops = sum(makes_stop),
+              num_mult_stops = sum(makes_multiple_stops),
+              .groups = "keep") %>%
+    mutate(num_thrus = num_trips - num_stops,
+           AOG = num_thrus / num_trips,
+           sf = num_mult_stops / num_trips)
+  
+  # save results
+  metrics_res[[as.character(s)]] <- metrics
+}
+
+# Bind rows together
+s_lev <- as.character(test_speeds * 2.237)
+metrics_df <- bind_rows(metrics_res, .id = "s") %>%
+  mutate(s = as.character(round(as.numeric(s) * 2.237, 1)),
+         s = factor(s, levels = s_lev),
+         aog_lab = percent(AOG, accuracy = 1),
+         sf_lab = percent(sf, accuracy = 1))
+```
+
+
+``` r
+p_aog <- ggplot(data = metrics_df,
+                aes(x = name, y = AOG,
+                    group = s, fill = s, color = s)) +
+  geom_col(alpha = 0.8, linewidth = 0.6,
+           position = position_dodge(width = 0.9)) +
+  geom_text(aes(label = aog_lab, y = AOG + 0.04),
+            size = 2.5,
+            position = position_dodge(width = 0.9),
+            hjust = 0.5, angle = 45,
+            show.legend = FALSE) +
+  scale_color_viridis_d(name = "Stop Speed\nThreshold (mph)") +
+  scale_fill_viridis_d(name = "Stop Speed\nThreshold (mph)") +
+  theme_minimal() +
+  labs(title = "(A) Arrival-on-Green",
+       x = "Signal",
+       y = "Probability of Arrival-on-Green") +
+  theme(plot.title.position = "plot")
+
+p_sf <- ggplot(data = metrics_df,
+               aes(x = name, y = sf,
+               group = s, fill = s, color = s)) +
+  geom_col(alpha = 0.8, linewidth = 0.6,
+           position = position_dodge(width = 0.9)) +
+  geom_text(aes(label = sf_lab, y = sf + 0.01),
+            size = 2.5,
+            position = position_dodge(width = 0.9),
+            hjust = 0.5, angle = 45,
+            show.legend = FALSE) +
+  scale_color_viridis_d(name = "Stop Speed\nThreshold (mph)") +
+  scale_fill_viridis_d(name = "Stop Speed\nThreshold (mph)") +
+  theme_minimal() +
+  labs(title = "(B) Split Failures",
+       x = "Signal",
+       y = "Probability of Split Failure") +
+  theme(plot.title.position = "plot")
+
+p_s_sens <- p_aog + p_sf +
+  plot_layout(ncol = 2, nrow = 1,
+              axes = "collect", axis_titles = "collect",
+              guides = "collect")
+p_s_sens
+```
+
+
+
+<img src="figures/figure_C2.png" alt="" width="100%" />
+
+# Session Information
+
+
+``` r
+# Print version of R
+version
+#>                _                                
+#> platform       x86_64-w64-mingw32               
+#> arch           x86_64                           
+#> os             mingw32                          
+#> crt            ucrt                             
+#> system         x86_64, mingw32                  
+#> status                                          
+#> major          4                                
+#> minor          6.2                              
+#> year           2026                             
+#> month          10                               
+#> day            29                               
+#> svn rev        90784                            
+#> language       R                                
+#> version.string R version 4.6.2 (2026-10-29 ucrt)
+#> nickname       Diversified Portfolio
+
+# Print versions of all loaded packages
+sessionInfo()
+#> R version 4.6.2 (2026-10-29 ucrt)
+#> Platform: x86_64-w64-mingw32/x64
+#> Running under: Windows 11 x64 (build 26200)
+#> 
+#> Matrix products: default
+#>   LAPACK version 3.12.1
+#> 
+#> locale:
+#> [1] LC_COLLATE=English_United States.utf8  LC_CTYPE=English_United States.utf8    LC_MONETARY=English_United States.utf8 LC_NUMERIC=C                           LC_TIME=English_United States.utf8    
+#> 
+#> time zone: America/Chicago
+#> tzcode source: internal
+#> 
+#> attached base packages:
+#> [1] stats     graphics  grDevices utils     datasets  methods   base     
+#> 
+#> other attached packages:
+#>  [1] scales_1.4.0      ggbeeswarm_0.7.3  ggspatial_1.1.11  patchwork_1.3.2   marquee_1.2.1     lubridate_1.9.5   forcats_1.0.1     stringr_1.6.0     dplyr_1.2.1       purrr_1.2.2       readr_2.2.0       tidyr_1.3.2       tibble_3.3.1      ggplot2_4.0.3     tidyverse_2.0.0   transittraj_1.2.0
+#> 
+#> loaded via a namespace (and not attached):
+#>  [1] utf8_1.2.6         generics_0.1.4     class_7.3-24       KernSmooth_2.23-27 stringi_1.8.9      hms_1.1.4          digest_0.6.39      magrittr_2.0.5     evaluate_1.0.5     grid_4.6.2         timechange_0.4.0   RColorBrewer_1.1-3 fastmap_1.2.0      e1071_1.7-17       DBI_1.3.0          bench_1.1.4        textshaping_1.0.5  cli_3.6.6          rlang_1.3.0        units_1.0-1        withr_3.0.3        yaml_2.3.12        otel_0.3.0         tools_4.6.2        tzdb_0.5.0         profmem_0.7.0      vctrs_0.7.3        R6_2.6.1           proxy_0.4-29       lifecycle_1.0.5    classInt_0.4-11    vipor_0.4.7        ragg_1.5.2         beeswarm_0.4.0     pkgconfig_2.0.3    pillar_1.11.1      gtable_0.3.6       Rcpp_1.1.2         glue_1.8.1         systemfonts_1.3.2  sf_1.1-3           xfun_0.62          tidyselect_1.2.1   rstudioapi_0.19.0  knitr_1.52         farver_2.1.2       htmltools_0.5.9    labeling_0.4.3     rmarkdown_2.32     compiler_4.6.2     S7_0.2.2
+```
 
 

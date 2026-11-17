@@ -7,6 +7,10 @@ knitr::opts_chunk$set(
   collapse = TRUE,
   comment = "#>"
 )
+options(
+  max.print = 100000,
+  width = 1000
+)
 ```
 
 # Introduction
@@ -38,11 +42,13 @@ library(tidyverse)
 library(marquee)
 library(patchwork)
 library(ggspatial)
+library(ggbeeswarm)
+library(scales)
 ```
 
 ``` {r, include = FALSE, eval = TRUE}
 # Load
-traj <- readRDS("C:\\Users\\obrie\\OneDrive - University of Illinois - Urbana\\IndyGo Project\\Deliverables\\Conferences\\TRB2027\\Package\\tables\\traj.rds")
+traj <- readRDS("C:\\Users\\obrie\\OneDrive - University of Illinois - Urbana\\IndyGo Project\\Analysis_new\\avl_data\\rt90\\trajectories\\traj_90N_2024_11to12_2026-11-11.rds")
 
 route_geom <- readRDS("C:\\Users\\obrie\\OneDrive - University of Illinois - Urbana\\IndyGo Project\\Analysis_new\\spatial\\routes\\route_geom_90N.rds")
 stops <- readRDS("C:\\Users\\obrie\\OneDrive - University of Illinois - Urbana\\IndyGo Project\\Analysis_new\\spatial\\routes\\stop_distances.rds") %>%
@@ -52,8 +58,6 @@ stops <- readRDS("C:\\Users\\obrie\\OneDrive - University of Illinois - Urbana\\
                                     pattern = " Station NB"))
 signals <- readRDS("C:\\Users\\obrie\\OneDrive - University of Illinois - Urbana\\IndyGo Project\\Analysis_new\\spatial\\signals\\signals_90N.rds") %>%
   select(name, distance, routes)
-signal_boundings <- readRDS("C:\\Users\\obrie\\OneDrive - University of Illinois - Urbana\\IndyGo Project\\Analysis_new\\spatial\\signals\\intersection_bounding_90N.rds") %>%
-  select(-time)
 ```
 
 Next, we'll set some parameters for our visualizations:
@@ -80,6 +84,8 @@ marquee_label <- function(border = "firebrick") {
 
 # Benchmark
 bench_iter <- 20
+bm <- list()
+bm_times <- list()
 ```
 
 Let's briefly explore our data. First, we can print a summary of our fit trajectory object `traj`. This tells us that, with the cleaning parameters used, we have 3100 valid trips. Trajectories were fit using VCHIP-ME interpolating splines.
@@ -283,7 +289,18 @@ bm_crossings <- bench::mark(
   # benchmark
   time_unit = "s", check = TRUE, iterations = bench_iter, min_time = Inf
 )
+
+# Benchmarking
 sig_crossings <- bm_crossings$result[[1]]
+bm[["Inverse Crossings"]] <- data.frame(
+  min_t = bm_crossings$min,
+  med_t = bm_crossings$median,
+  mem_alloc = as.character(bm_crossings$mem_alloc),
+  ngc = bm_crossings$n_gc
+)
+bm_times[["Inverse Crossings"]] <- data.frame(
+  t = as.numeric(bm_crossings$time[[1]])
+)
 ```
 
 Each row of `sig_crossings` will represent each trip's crossing time through each exit and entrance point. If we pivot these rows to separate columns, we can subtract them to estimate each trip's travel time and delay through each signal.
@@ -302,7 +319,6 @@ sig_ff <- sig_tt %>%
   group_by(name) %>%
   summarize(min_tt = min(travel_time),
             max_tt = max(travel_time),
-            tt_85th = quantile(travel_time, 0.85),
             free_flow = quantile(travel_time, 0.05),
             mean_tt = mean(travel_time),
             std_tt = sd(travel_time),
@@ -341,7 +357,18 @@ bm_interp <- bench::mark(
   # benchmark
   time_unit = "s", check = TRUE, iterations = bench_iter, min_time = Inf
 )
+
+# Benchmarking
 trip_dists <- bm_interp$result[[1]]
+bm[["Bounded Steps"]] <- data.frame(
+  min_t = bm_interp$min,
+  med_t = bm_interp$median,
+  mem_alloc = as.character(bm_interp$mem_alloc),
+  ngc = bm_interp$n_gc
+)
+bm_times[["Bounded Steps"]] <- data.frame(
+  t = as.numeric(bm_interp$time[[1]])
+)
 
 # Pivot wider: give dist & speed separate columns
 trip_dists_piv <- trip_dists %>%
@@ -367,7 +394,7 @@ With this dataframe, we'll identify segments where each trip is stopped. We'll c
 
 ``` {r}
 # Set up RLE
-stop_cutoff <- 1.341 # m/s, roughly 3 mph
+stop_cutoff <- 3 / 2.237 # mph -> m/s
 stopped_rle_fun <- function(is_stopped, trip_id_performed) {
   rle_obj <- rle(x = is_stopped)
   out_vec <- rep(x = seq_along(rle_obj$values), times = rle_obj$length)
@@ -536,24 +563,23 @@ stop_df2 <- trip_events %>%
          y = sig_bounds[2] - 60)
 
 del_plot <- ggplot() +
+  geom_rect(data = stop_df2,
+            aes(xmin = time_begin, xmax = time_end,
+                ymin = -Inf, ymax = Inf),
+            color = NULL, fill = my_r, alpha = 0.2) +
   geom_hline(aes(yintercept = sig_bounds, linetype = "Entrance/Exit"),
              color = "grey50", linewidth = 0.6) +
   geom_hline(data = stopbars_filt,
              aes(yintercept = distance, linetype = "Stopbar"),
              linewidth = 0.8, color = "grey50") +
-  geom_vline(data = stop_df2,
-             aes(xintercept = time_begin),
-             color = "firebrick", linewidth = 1, linetype = "dotdash") +
-  geom_vline(data = stop_df2,
-             aes(xintercept = time_end),
-             color = "firebrick", linewidth = 1, linetype = "dotdash") +
   geom_line(data = plot_df2,
             aes(x = event_timestamp, y = distance, color = speed),
             linewidth = 3) +
   geom_segment(data = stop_df2,
                aes(x = time_begin, xend = time_end,
                    y = y + 15, yend = y + 15),
-               arrow = arrow(ends = "both", type = "closed", length = unit(0.025, units = "npc")),
+               arrow = arrow(ends = "both", type = "closed",
+                             length = unit(0.025, units = "npc")),
                color = "firebrick", linetype = "solid", linewidth = 0.7) +
   geom_marquee(data = stop_df2,
                aes(x = x, y = y - 8, label = lab),
@@ -596,11 +622,12 @@ stop_df3 <- trip_events %>%
             by = c("trip_id_performed", "name")) %>%
   mutate(time_elapsed = round(time_elapsed, 1),
          delay = round(delay, 1),
+         r = as.character(row_number()),
          lab = case_when(
-           row_number() == 1 ~ paste("*Stop ", row_number(), "*  \n",
+           r == "1" ~ paste("*Stop ", row_number(), "*  \n",
                                      "**Duration**: ", time_elapsed, " s",
                                      sep = ""),
-           row_number() == 2 ~ paste("*Stop ", row_number(), "*  \n",
+           r == "2" ~ paste("*Stop ", row_number(), "*  \n",
                                      "**Duration**: ", time_elapsed, " s  \n",
                                      "**Total Delay**: ", delay, " s",
                                      sep = "")
@@ -609,14 +636,13 @@ stop_df3 <- trip_events %>%
          y = c(sig_bounds[2] - 82, sig_bounds[2] - 65))
 
 sf_plot <- ggplot() +
+  geom_rect(data = stop_df3,
+            aes(xmin = time_begin, xmax = time_end,
+                ymin = -Inf, ymax = Inf,
+                group = r),
+            color = NULL, fill = my_r, alpha = 0.2) +
   geom_hline(aes(yintercept = sig_bounds, linetype = "Entrance/Exit"),
              color = "grey50", linewidth = 0.6) +
-  geom_vline(data = stop_df3,
-             aes(xintercept = time_begin),
-             color = "firebrick", linewidth = 1, linetype = "dotdash") +
-  geom_vline(data = stop_df3,
-             aes(xintercept = time_end),
-             color = "firebrick", linewidth = 1, linetype = "dotdash") +
   geom_hline(data = stopbars_filt,
              aes(yintercept = distance, linetype = "Stopbar"),
              linewidth = 0.8, color = "grey50") +
@@ -657,15 +683,12 @@ combo_plot
 ggsave(plot = combo_plot,
        height = 60, width = 190, units = "mm",
        scale = 1.5, fallback_resolution = 1000,
-       filename = "C:\\Users\\obrie\\OneDrive - University of Illinois - Urbana\\IndyGo Project\\Deliverables\\Papers\\JPT\\images\\figure_6.pdf", device = cairo_pdf)
+       filename = "C:\\Users\\obrie\\OneDrive - University of Illinois - Urbana\\IndyGo Project\\Deliverables\\Papers\\JPT_v2\\images\\figure_6.pdf", device = cairo_pdf)
 
-suppressWarnings(
-  pdftools::pdf_convert(
-    pdf = "C:\\Users\\obrie\\OneDrive - University of Illinois - Urbana\\IndyGo Project\\Deliverables\\Papers\\JPT\\images\\figure_6.pdf",
-    filenames = "figures/figure_6.png",
-    format = "png", dpi = 500
-  )
-)
+ggsave(plot = combo_plot,
+       height = 60, width = 190, units = "mm",
+       scale = 1.5, dpi = 500,
+       filename = "figures/figure_6.png", device = ragg::agg_png)
 ```
 
 ``` {r, echo = FALSE, eval = TRUE, out.width = "100%", fig.cap = ""}
@@ -758,7 +781,6 @@ av::av_video_images(video = "C:/Users/obrie/OneDrive - University of Illinois - 
 ```
 
 https://github.com/user-attachments/assets/253bc04c-4efa-4dab-bb15-6ebed713114e
-
 
 Finally, we'll generate an animated line using `plot_animated_line()`. We can use the same formatting parameters defined above.
 
@@ -945,15 +967,12 @@ combo_plot
 ggsave(plot = combo_plot,
        height = 75, width = 190, units = "mm",
        scale = 1.5, fallback_resolution = 1000,
-       filename = "C:\\Users\\obrie\\OneDrive - University of Illinois - Urbana\\IndyGo Project\\Deliverables\\Papers\\JPT\\images\\figure_7.pdf", device = cairo_pdf)
+       filename = "C:\\Users\\obrie\\OneDrive - University of Illinois - Urbana\\IndyGo Project\\Deliverables\\Papers\\JPT_v2\\images\\figure_7.pdf", device = cairo_pdf)
 
-suppressWarnings(
-  pdftools::pdf_convert(
-    pdf = "C:\\Users\\obrie\\OneDrive - University of Illinois - Urbana\\IndyGo Project\\Deliverables\\Papers\\JPT\\images\\figure_7.pdf",
-    filenames = "figures/figure_7.png",
-    format = "png", dpi = 500
-  )
-)
+ggsave(plot = combo_plot,
+       height = 75, width = 190, units = "mm",
+       scale = 1.5, dpi = 500,
+       filename = "figures/figure_7.png", device = ragg::agg_png)
 ```
 
 ``` {r, echo = FALSE, eval = TRUE, out.width = "100%", fig.cap = ""}
@@ -972,9 +991,329 @@ print(bm_crossings)
 print(bm_interp)
 ```
 
+# Full Benchmarking Results
+
+In this section, we'll summarize the full benchmarking results, included in Appendix B of the paper.
+
+## Table
+
+We'll create a table summarizing the important information included in each `bench::mark` object:
+
+``` {r}
+bm_tab <- bind_rows(bm, .id = "Interpolation Type")
+bm_clean <- bm_tab %>%
+  mutate(min_t = sprintf(min_t, fmt = "%.2f"),
+         med_t = sprintf(med_t, fmt = "%.2f")) %>%
+  rename(`Minimum` = min_t,
+         `Median` = med_t,
+         `Memory Allocation` = mem_alloc,
+         `Number of Garbage Collections` = ngc)
+
+knitr::kable(bm_clean)
+```
+
+``` {r, eval = TRUE, echo = FALSE}
+write.csv(x = bm_clean,
+          file = "C:\\Users\\obrie\\OneDrive - University of Illinois - Urbana\\IndyGo Project\\Deliverables\\Papers\\JPT_v2\\tables\\bm_interp_full_11-16-26.csv")
+```
+
+## Visualiation
+
+Finally, below we plot the distribution of individual iterations' processing times:
+
+``` {r}
+bm_times_df <- bind_rows(bm_times, .id = "Interpolation Type")
+
+bm_plot <- ggplot(data = bm_times_df) +
+  geom_beeswarm(aes(x = t, y = `Interpolation Type`,
+                    color = "Iteration", shape = "Iteration"),
+                method = "center",
+                size = 2.3, alpha = 0.6) +
+  geom_point(data = bm_tab,
+             aes(x = med_t, y = `Interpolation Type`,
+                 color = "Median", shape = "Median"),
+             size = 3.2, alpha = 1) +
+  scale_color_manual(name = NULL,
+                     values = c("Iteration" = my_r,
+                                "Median" = my_b)) +
+  scale_shape_manual(name = NULL,
+                     values = c("Iteration" = 20,
+                                "Median" = 15)) +
+  theme_minimal() +
+  labs(x = "Time (s)",
+       y = "Interpolation Type")
+```
+
+``` {r, echo = FALSE, eval = TRUE}
+ggsave(plot = bm_plot,
+       height = 80, width = 190, units = "mm",
+       scale = 1.5, fallback_resolution = 1000,
+       filename = "C:\\Users\\obrie\\OneDrive - University of Illinois - Urbana\\IndyGo Project\\Deliverables\\Papers\\JPT_v2\\images\\figure_B2.pdf",
+       device = cairo_pdf)
+ggsave(plot = bm_plot,
+       height = 80, width = 190, units = "mm",
+       scale = 1.5, dpi = 500,
+       filename = "figures/figure_B2.png", device = ragg::agg_png)
+```
+
+``` {r, echo = FALSE, out.width = "100%", fig.cap = ""}
+knitr::include_graphics(path = "figures/figure_B2.png")
+```
+
+# Sensitivity Analysis
+
+Our analysis included two tuning parameters: (1) the quantile defining "free-flow travel time", and (2) the stopping speed threshold. In this section, we evaluate the sensitivity of our results to these paramters.
+
+## Signal Delay
+
+We can re-use the previous interpolation `predict()` call here; we just have to analyze the crossing times differently. Below we test a set of quantiles, ranging from the absolute minimum to the 15th-percentile, to define as free-flow:
+
+``` {r, eval = FALSE, echo = TRUE}
+test_ff_quantiles <- c(0, # absolute minimum
+                       0.01, 0.025,
+                       0.05, # used in paper
+                       0.1, 0.15)
+
+ff_res <- list()
+del_res <- list()
+for (q in test_ff_quantiles) {
+  
+  # Calculate signal free-flow times
+  ff <- sig_tt %>%
+    group_by(name) %>%
+    summarize(free_flow = quantile(travel_time, q))
+  
+  # Calculate signal delays
+  del <- sig_tt %>%
+    left_join(y = (ff %>% select(name, free_flow)),
+              by = "name") %>%
+    mutate(delay = pmax(0, travel_time - free_flow))
+  
+  # Save results
+  ff_res[[as.character(q)]] <- ff
+  del_res[[as.character(q)]] <- del
+}
+
+# Bind rows together
+q_lev <- c("Minimum", "1.0%", "2.5%", "5.0%", "10.0%", "15.0%")
+ff_df <- bind_rows(ff_res, .id = "q") %>%
+  mutate(q = scales::percent(as.numeric(q),
+                             accuracy = 0.1),
+         q = if_else(q == "0.0%",
+                     true = "Minimum",
+                     false = q),
+         q = factor(q, levels = q_lev),
+         ff_lab = sprintf(free_flow, fmt = "%.1f"))
+del_df <- bind_rows(del_res, .id = "q") %>%
+  mutate(q = scales::percent(as.numeric(q),
+                             accuracy = 0.1),
+         q = if_else(q == "0.0%",
+                     true = "Minimum",
+                     false = q),
+         q = factor(q, levels = q_lev))
+
+```
+
+And now we plot these:
+
+``` {r, eval = FALSE, echo = TRUE}
+p_ff <- ggplot(data = ff_df,
+               aes(x = name, y = free_flow,
+                   group = q, fill = q, color = q)) +
+  geom_col(alpha = 0.8, linewidth = 0.6,
+           position = position_dodge(width = 0.9)) +
+  geom_text(aes(label = ff_lab),
+            size = 2.5,
+            position = position_dodge(width = 0.9),
+            vjust = -0.5,
+            show.legend = FALSE) +
+  scale_fill_viridis_d(name = "Free-Flow\nPercentile") +
+  scale_color_viridis_d(name = "Free-Flow\nPercentile") +
+  theme_minimal() +
+  labs(title = "(A) Free-Flow Travel Times",
+       x = "Signal",
+       y = "Free-Flow Travel Time (s)") +
+  theme(plot.title.position = "plot")
+
+p_del <- ggplot(data = del_df) +
+  geom_violin(aes(x = name, y = delay,
+                  fill = q, color = q),
+              alpha = 0.8, linewidth = 0.6,
+              position = "dodge") +
+  scale_fill_viridis_d(name = "Free-Flow\nPercentile") +
+  scale_color_viridis_d(name = "Free-Flow\nPercentile") +
+  ylim(c(0, 100)) +
+  theme_minimal() +
+  labs(title = "(B) Delay Distribution",
+       x = "Signal",
+       y = "Delay (s)") +
+  theme(plot.title.position = "plot")
+
+p_ff_sens <- p_ff + p_del +
+  plot_layout(ncol = 2, nrow = 1,
+              axis_titles = "collect", axes = "collect",
+              guides = "collect")
+p_ff_sens
+```
+
+``` {r, eval = FALSE, include = FALSE}
+ggsave(plot = p_ff_sens,
+       height = 80, width = 190, units = "mm",
+       scale = 1.5, fallback_resolution = 1000,
+       filename = "C:\\Users\\obrie\\OneDrive - University of Illinois - Urbana\\IndyGo Project\\Deliverables\\Papers\\JPT_v2\\images\\figure_C1.pdf",
+       device = cairo_pdf)
+
+ggsave(plot = p_ff_sens,
+       height = 80, width = 190, units = "mm",
+       scale = 1.5, dpi = 500,
+       filename = "figures/figure_C1.png",
+       device = ragg::agg_png)
+```
+
+``` {r, echo = FALSE, eval = TRUE, out.width = "100%", fig.cap = ""}
+knitr::include_graphics(path = "figures/figure_C1.png")
+```
+
+## Aog & SF
+
+Next, we similarly re-calculate AoG and SF using a variety of speed cutoffs, ranging from near-zero (0.1 mph) to 10 mph.
+
+``` {r, eval = FALSE, echo = TRUE}
+test_speeds <- c(0.1, # representing "near-zero"
+                 1,
+                 3,
+                 5, 7, 10) / 2.237 # mph -> m/s
+
+metrics_res <- list()
+for (s in test_speeds) {
+  
+  # get distinct stopped periods, based on s
+  stops <- trip_dists_piv %>%
+    left_join(y = sig_bnds_join,
+              join_by(distance >= Entrance, distance <= Exit)) %>%
+    select(-c(Entrance, Exit)) %>%
+    filter(!is.na(name)) %>%
+    mutate(is_stopped = as.numeric(speed < s)) %>%
+    arrange(trip_id_performed, event_timestamp) %>%
+    group_by(trip_id_performed, name) %>%
+    mutate(run_index = stopped_rle_fun(is_stopped = is_stopped),
+           run_id = paste(trip_id_performed, name, run_index,
+                          sep = "-")) %>%
+    ungroup()
+  
+  # summarize distinct events
+  events <- stops %>%
+    group_by(name, run_id) %>%
+    summarize(trip_id_performed = first(trip_id_performed),
+              is_stopped = max(is_stopped),
+              .groups = "keep")
+  
+  # summarize trips through signals
+  sig_stops <- events %>%
+    group_by(name, trip_id_performed) %>%
+    summarize(num_stops = sum(is_stopped),
+              .groups = "keep") %>%
+    mutate(makes_stop = as.numeric(num_stops > 0),
+           makes_multiple_stops = as.numeric(num_stops > 1))
+  
+  # signal metrics
+  metrics <- sig_stops %>%
+    group_by(name) %>%
+    summarize(num_trips = n(),
+              num_stops = sum(makes_stop),
+              num_mult_stops = sum(makes_multiple_stops),
+              .groups = "keep") %>%
+    mutate(num_thrus = num_trips - num_stops,
+           AOG = num_thrus / num_trips,
+           sf = num_mult_stops / num_trips)
+  
+  # save results
+  metrics_res[[as.character(s)]] <- metrics
+}
+
+# Bind rows together
+s_lev <- as.character(test_speeds * 2.237)
+metrics_df <- bind_rows(metrics_res, .id = "s") %>%
+  mutate(s = as.character(round(as.numeric(s) * 2.237, 1)),
+         s = factor(s, levels = s_lev),
+         aog_lab = percent(AOG, accuracy = 1),
+         sf_lab = percent(sf, accuracy = 1))
+```
+
+``` {r, eval = FALSE, echo = TRUE}
+p_aog <- ggplot(data = metrics_df,
+                aes(x = name, y = AOG,
+                    group = s, fill = s, color = s)) +
+  geom_col(alpha = 0.8, linewidth = 0.6,
+           position = position_dodge(width = 0.9)) +
+  geom_text(aes(label = aog_lab, y = AOG + 0.04),
+            size = 2.5,
+            position = position_dodge(width = 0.9),
+            hjust = 0.5, angle = 45,
+            show.legend = FALSE) +
+  scale_color_viridis_d(name = "Stop Speed\nThreshold (mph)") +
+  scale_fill_viridis_d(name = "Stop Speed\nThreshold (mph)") +
+  theme_minimal() +
+  labs(title = "(A) Arrival-on-Green",
+       x = "Signal",
+       y = "Probability of Arrival-on-Green") +
+  theme(plot.title.position = "plot")
+
+p_sf <- ggplot(data = metrics_df,
+               aes(x = name, y = sf,
+               group = s, fill = s, color = s)) +
+  geom_col(alpha = 0.8, linewidth = 0.6,
+           position = position_dodge(width = 0.9)) +
+  geom_text(aes(label = sf_lab, y = sf + 0.01),
+            size = 2.5,
+            position = position_dodge(width = 0.9),
+            hjust = 0.5, angle = 45,
+            show.legend = FALSE) +
+  scale_color_viridis_d(name = "Stop Speed\nThreshold (mph)") +
+  scale_fill_viridis_d(name = "Stop Speed\nThreshold (mph)") +
+  theme_minimal() +
+  labs(title = "(B) Split Failures",
+       x = "Signal",
+       y = "Probability of Split Failure") +
+  theme(plot.title.position = "plot")
+
+p_s_sens <- p_aog + p_sf +
+  plot_layout(ncol = 2, nrow = 1,
+              axes = "collect", axis_titles = "collect",
+              guides = "collect")
+p_s_sens
+```
+
+``` {r, eval = FALSE, include = FALSE}
+ggsave(plot = p_s_sens,
+       height = 80, width = 190, units = "mm",
+       scale = 1.5, fallback_resolution = 1000,
+       filename = "C:\\Users\\obrie\\OneDrive - University of Illinois - Urbana\\IndyGo Project\\Deliverables\\Papers\\JPT_v2\\images\\figure_C2.pdf",
+       device = cairo_pdf)
+
+ggsave(plot = p_s_sens,
+       height = 80, width = 190, units = "mm",
+       scale = 1.5, dpi = 500,
+       filename = "figures/figure_C2.png",
+       device = ragg::agg_png)
+```
+
+``` {r, echo = FALSE, eval = TRUE, out.width = "100%", fig.cap = ""}
+knitr::include_graphics(path = "figures/figure_C2.png")
+```
+
+# Session Information
+
+``` {r}
+# Print version of R
+version
+
+# Print versions of all loaded packages
+sessionInfo()
+```
+
 ``` {r, eval = FALSE, echo = FALSE}
 # - Knit -
 knitr::knit(input = "vignettes/raw-tspm.Rmd",
             output = "vignettes/tspm.md")
 ```
-

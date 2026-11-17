@@ -1,0 +1,1195 @@
+---
+title: "Comparing Forward and Bidirectional Monotonic Enforcement"
+---
+
+
+
+# Introduction
+
+In the paper, we propose an extension of [Robbenalt et al. (2026)](https://arxiv.org/abs/2509.00119)'s monotonic enforcement algorithm, implemented via `transittraj`'s `make_monotonic()` function. Appendix A of the paper compares the data quality of the proposed method to that of [Robbenalt et al. (2026)](https://arxiv.org/abs/2509.00119)'s original method. This vignette contains all code used to complete and visualize these analyses.
+
+This vignette is intended to complement our paper. Check out the full paper for a more thorough discussion of this methodology.
+
+# Data
+
+Let's begin by loading the libraries we'll be using:
+
+
+``` r
+# Data
+library(transittraj)
+library(tidyverse)
+
+# Plotting
+library(patchwork)
+library(marquee)
+library(scales)
+my_r <- "#f43155"
+my_b <- "#2f6ff8"
+my_g <- "#00A884"
+```
+
+We perform this check on AVL data from IndyGo's northbound Red Line BRT service. We accessed IndyGo’s AVL data from their Swiftly endpoint, after which it was reformatted to meet the TIDES standards required by `transittraj` and stored in the dataframe `avl_df`. We do not have permission to share this dataset, and so have pre-loaded it into our RStudio session before running this vignette..
+
+
+
+
+``` r
+# Number of observations
+paste(dim(avl_df)[1], " observations",
+      sep = "")
+#> [1] "1707095 observations"
+
+# Number of trips
+paste(length(unique(avl_df$trip_id_performed)), " trips",
+      sep = "")
+#> [1] "3256 trips"
+
+# Time range
+paste("Time range: ", as.POSIXct(min(avl_df$event_timestamp), tz = "America/New_York"),
+      " - to - ", as.POSIXct(max(avl_df$event_timestamp), tz = "America/New_York"),
+      sep = "")
+#> [1] "Time range: 2024-11-01 00:00:01 - to - 2024-12-31 23:58:58"
+```
+
+The second piece of data required is the northbound Red Line's alignment. This was accessed through IndyGo's GTFS `shapes.txt` file, and is stored in the `sf` object `route_geom`.
+
+
+``` r
+print(route_geom)
+#> # A tibble: 1 × 2
+#> Error in `[<-`:
+#> ! Assigned data `map(.subset(x, unname), vectbl_set_names, NULL)` must be a vector.
+#> Caused by error in `vec_size()`:
+#> ! `x` must be a vector, not a <sfc_MULTILINESTRING> object.
+#> ✖ Detected incompatible scalar S3 list. To be treated as a vector, the object must explicitly inherit from <list> or should implement a `vec_proxy()` method. Class: <sfc_MULTILINESTRING/sfc>.
+#> ℹ If this object comes from a package, please report this error to the package author.
+#> ℹ Read our FAQ about creating vector types (`?vctrs::howto_faq_fix_scalar_type_error`) to learn more.
+```
+
+Also accessed through the GTFS were the stop locations, snapped to the route shape using `get_stop_distances()`:
+
+
+``` r
+head(stops)
+#> # A tibble: 6 × 3
+#>   stop_id stop_name                  distance
+#>   <chr>   <chr>                         <dbl>
+#> 1 70052   University Station NB            0 
+#> 2 70051   Troy Station NB               1478.
+#> 3 70049   Garfield Park Station NB      2245.
+#> 4 70047   Raymond Station NB            3113.
+#> 5 70045   Pleasant Run Station NB       3794.
+#> 6 70043   Fountain Square Station NB    4846.
+```
+
+Because this vignette focuses on the final cleaning step, we'll begin by cleaning the dataset until that point (i.e., through Step 6):
+
+
+``` r
+# Cleaning parameters
+indy_crs <- 32616 # WGS 84 UTM Zone 16N
+route_buffer = 50 # meters
+min_dist = 200 # meters
+min_dur = 90 # seconds
+dist_error = 0.001 # meters
+max_d_gap = 800 # meters
+hampel_t = 3
+
+# Project AVL onto route
+distance_df <- get_linear_distances(avl_df = avl_df,
+                                    shape_geometry = route_geom,
+                                    clip_buffer = route_buffer,
+                                    project_crs = indy_crs) %>%
+  filter(distance < 20500)
+
+# Step 3
+s3 <- clean_overlapping_subtrips(distance_df = distance_df,
+                                 check_operator = TRUE,
+                                 remove_single_observations = TRUE)
+# Step 4
+s4 <- clean_jumps(distance_df = s3,
+                  t_cutoff = hampel_t)
+s4_remov <- clean_jumps(distance_df = s3,
+                        return_removals = TRUE,
+                        t_cutoff = hampel_t) %>%
+  pull(location_ping_id)
+
+# Step 5
+s5 <- trim_trips(distance_df = s4)
+#> Warning: Trips found with maximum at or before minimum point -- potential wrong direction.
+#> Removing the following: 2024-11-22-t325-b2331-sl3-N, 2024-11-25-t803-b2335-sl3-N, 2024-12-05-t60E-b2334-sl3-N, 2024-12-12-t84D-b233C-sl3-N, 2024-12-31-t5-b233D-sl3-N
+
+# Step 6
+s6 <- clean_incomplete_trips(distance_df = s5,
+                             min_trip_distance = min_dist,
+                             min_trip_duration = min_dur,
+                             max_distance_gap = max_d_gap)
+```
+
+# Proposed Method
+
+[Robbenalt et al. (2026)](https://arxiv.org/abs/2509.00119) propose a forward-stepping monotonic enforcement algorithm, moving forward in time along a trajectory and "pulling up" any point which backtracks, resulting in a trajectory guaranteed to be monotonically increasing. A backward-stepping algorithm intuitively follows, moving backward in time along a trajectory and "pushing down" any point which drifts forward.
+
+Assuming that drifting around a stationary period is random -- both in magnitude and direction -- using either one of these alone risks biasing the position estimate: forward-stepping takes any random jump forward as the truth, and backward-stepping takes any random jump back as the truth. This is especially problematic on the first (for backward-stepping) and last (for forward-stepping) points of a stationary period, where the correction can make the vehicle appear stationary before it has actually stopped.
+
+As a solution, we propose a *bidirectional* monotonic correction, performing *both* the forward- and backward-stepping algorithms on the raw data, then averaging these outcomes. The intuition here is the forward-stepping establishes an upper-bound of the bus's position, and backward-stepping establishes a lower-bound; the true monotonic trajectory should lie somewhere in between. Mathematically, this averaged trajectory is guaranteed to be monotonic because it is a convex combination of two monotonically increasing curves.
+
+To better see this upper/lower bound, below we plot an example trajectory of a bus standing stationary at a station for a prolonged period.
+
+
+``` r
+# Get desired trip & location
+plot_trip <- "2024-11-19-t79F-b2339-sl3-N"
+plot_stop <- "Meridian St & Fall Creek/Ivy Tech Statio"
+plot_lims <- c(11800, 12005)
+trip_df <- s6 %>%
+  filter(trip_id_performed == plot_trip) %>%
+  filter(distance >= plot_lims[1] & 
+           distance <= plot_lims[2]) %>%
+  select(location_ping_id, trip_id_performed, event_timestamp, distance, speed)
+
+# Create dataframe of different monotonic corrections
+plot_df <- bind_rows(
+  # Raw distances
+  trip_df %>% mutate(type = "Raw"),
+  # Bidirectional monotonic correction
+  make_monotonic(distance_df = trip_df,
+                 correct_speed = TRUE,
+                 add_distance_error = dist_error,
+                 direction = "bidirectional") %>%
+    mutate(type = "Bidirectional"),
+  # Forward monotonic correction
+  make_monotonic(distance_df = trip_df,
+                 correct_speed = TRUE,
+                 add_distance_error = dist_error,
+                 direction = "forward") %>%
+    mutate(type = "Forward"),
+  # Backward monotonic correction
+  make_monotonic(distance_df = trip_df,
+                 correct_speed = TRUE,
+                 add_distance_error = dist_error,
+                 direction = "backward") %>%
+    mutate(type = "Backward")
+)
+
+# DF for speed labels
+speed_labs <- trip_df %>%
+  mutate(speed = sprintf(speed, fmt = "%.1f"),
+         r = row_number(),
+         speed = case_when(
+           r == 1 | r == length(r) ~ paste(speed, "\nm/s", sep = ""),
+           .default = speed
+         ),
+         y1 = case_when(
+           r == 3 ~ distance - 13,
+           r %in% 4:6 ~ 11935,
+           .default = distance + 13
+         ),
+         y2 = case_when(
+           r < 4 | r > 17 ~ distance + 10,
+           .default = 11935
+         ))
+
+# DF for stop
+stop_df <- stops %>%
+  filter(stop_name == plot_stop) %>%
+  mutate(label = "Fall Creek\nStation")
+```
+
+
+``` r
+raw_plot <- ggplot() +
+  # stop
+  geom_hline(data = stop_df,
+             aes(yintercept = distance),
+             color = "grey45", linewidth = 0.4) +
+  geom_label(data = stop_df,
+             aes(y = distance, x = min(plot_df$event_timestamp),
+                 label = label),
+             hjust = 0, alpha = 0.9, color = "grey30", size = 2.6) +
+  # points & lines for traj
+  geom_point(data = trip_df,
+             aes(x = event_timestamp, y = distance),
+             color = "grey30", fill = "grey30", alpha = 1,
+             size = 2.5, shape = 21) +
+  geom_line(data = trip_df,
+            aes(x = event_timestamp, y = distance),
+            linewidth = 1.5, alpha = 0.7, color = "grey30") +
+  # Speed label
+   geom_text(data = speed_labs,
+            aes(x = event_timestamp, y = y1, label = speed),
+            color = "black", size = 3) +
+  # Formatting
+  scale_y_continuous(limits = plot_lims) +
+  theme_minimal() +
+  theme(plot.title.position = "plot") +
+  labs(title = "(A) Raw Points",
+       x = "Time",
+       y = "Distance (m)")
+mono_plot <- ggplot() +
+  # stop
+  geom_hline(data = stop_df,
+             aes(yintercept = distance),
+             color = "grey45", linewidth = 0.4) +
+  # points & lines for traj
+  geom_point(data = plot_df,
+             aes(x = event_timestamp, y = distance,
+                 color = type, shape = type, size = type, fill = type)) +
+  geom_line(data = (plot_df %>% filter(type != "Raw")),
+            aes(x = event_timestamp, y = distance,
+                color = type, linewidth = type, alpha = type)) +
+  # speed labels
+  geom_text(data = speed_labs,
+            aes(x = event_timestamp, y = y2, label = speed),
+            color = "grey20", size = 2) +
+  # formatting
+  scale_y_continuous(limits = plot_lims) +
+  scale_color_manual(name = "Correction\nDirection",
+                     values = c("Raw" = "grey30",
+                                "Bidirectional" = my_g,
+                                "Forward" = my_r,
+                                "Backward" = my_b)) +
+  scale_fill_manual(name = "Correction\nDirection",
+                     values = c("Raw" = "grey30",
+                                "Bidirectional" = my_g,
+                                "Forward" = my_r,
+                                "Backward" = my_b)) +
+  scale_shape_manual(name = "Correction\nDirection",
+                     values = c("Raw" = 21,
+                                "Bidirectional" = 22,
+                                "Forward" = 24,
+                                "Backward" = 25)) +
+  scale_alpha_manual(name = "Correction\nDirection",
+                     values = c("Raw" = 0.5,
+                                "Bidirectional" = 0.7,
+                                "Forward" = 0.5,
+                                "Backward" = 0.5),
+                     guide = NULL) +
+  scale_linewidth_manual(name = "Correction\nDirection",
+                     values = c("Bidirectional" = 1.2,
+                                "Forward" = 0.8,
+                                "Backward" = 0.8),
+                     guide = NULL) +
+  scale_size_manual(name = "Correction\nDirection",
+                     values = c("Raw" = 2,
+                                "Bidirectional" = 1.5,
+                                "Forward" = 1.2,
+                                "Backward" = 1.2)) +
+  theme_minimal() +
+  theme(plot.title.position = "plot") +
+  labs(x = "Time",
+       y = "Distance (m)",
+       title = "(B) Monotonic Points")
+
+# combo
+raw_mono <- raw_plot + mono_plot +
+  plot_layout(ncol = 2, nrow = 1,
+              axes = "collect", axis_titles = "collect", guides = "collect")
+raw_mono
+```
+
+
+
+<img src="figures/figure_A1.png" alt="" width="100%" />
+
+Note how the bus's position drifts both backward, then forward, over the course of this period; taking the forward drifts as truth produces a trajectory likely too far forward, and taking the backward drifts produces on likely too far back. Somewhere in the middle appears more reasonable.
+
+Also pay special attention to the third point (with a speed of 5.8 m/s): in the backward-stepping correction, this is pushed down, making it look as though it's a part of the stationary period, even though the vehicle *should still be moving*. While it does not occur in this example, forward-stepping can do the same thing to the last point of a stationary period: the point when the bus *should start moving* is pulled up to become the final point of a stationary period.
+
+# Data Setup
+
+In this vignette, we compare the forward-stepping approach of [Robbenalt et al. (2026)](https://arxiv.org/abs/2509.00119) to our bidirectional approach. We apply both below:
+
+
+``` r
+validate_monotonicity(s6, check_speed = TRUE)
+#>   weak strict  speed 
+#>  FALSE  FALSE  FALSE
+
+# Forward
+mono_forward_df <- make_monotonic(distance_df = s6,
+                                  correct_speed = TRUE,
+                                  add_distance_error = 0.001,
+                                  direction = "forward")
+validate_monotonicity(mono_forward_df, check_speed = TRUE)
+#>   weak strict  speed 
+#>   TRUE   TRUE   TRUE
+
+# Bidirectional
+mono_bidir_df <- make_monotonic(distance_df = s6,
+                                correct_speed = TRUE,
+                                add_distance_error = 0.001,
+                                direction = "bidirectional")
+validate_monotonicity(mono_bidir_df, check_speed = TRUE)
+#>   weak strict  speed 
+#>   TRUE   TRUE   TRUE
+```
+
+Next, we compare the changes made by each method:
+
+
+``` r
+mono_deltas <- s6 %>%
+  select(location_ping_id, distance, speed) %>%
+  left_join(y = mono_forward_df %>%
+              select(location_ping_id, distance, speed) %>%
+              rename(for_d = distance, for_s = speed),
+            by = "location_ping_id") %>%
+  left_join(y = mono_bidir_df %>%
+              select(location_ping_id, distance, speed) %>%
+              rename(bi_d = distance, bi_s = speed),
+            by = "location_ping_id") %>%
+  mutate(delta_d_for = for_d - distance,
+         delta_d_bi = bi_d - distance,
+         delta_s_for = for_s - speed,
+         delta_s_bi = bi_s - speed,
+         d_changed_for = delta_d_for != 0,
+         d_changed_bi = delta_d_bi != 0,
+         s_changed_for = delta_s_for != 0,
+         s_changed_bi = delta_s_bi != 0)
+
+# numebr of points changed
+n_s_changed_for <- sum(mono_deltas$s_changed_for)
+n_s_changed_bi <- sum(mono_deltas$s_changed_bi)
+n_d_changed_for <- sum(mono_deltas$d_changed_for)
+n_d_changed_bi <- sum(mono_deltas$d_changed_bi)
+total_n <- length(unique(mono_deltas$location_ping_id))
+
+cat("Points w/ speed change: ", n_s_changed_for, " (forward), ",
+    n_s_changed_bi, " (bidirectional)",
+    "\nPoints w/ distance change: ", n_d_changed_for, " (forward), ",
+    n_d_changed_bi, " (bidirectional)",
+    "\nTotal points: ", total_n,
+    sep = "")
+```
+
+The bidirectional approach adjusts far more distance points, and slightly fewer speed points. Below we plot the distribution of these changes
+
+
+``` r
+d_plot <- ggplot() +
+  # Add violines
+  geom_violin(data = (mono_deltas %>% filter(d_changed_for)),
+              aes(x = delta_d_for, y = "Forward",
+                  color = "Forward", fill = "Forward"),
+              alpha = 0.8, linewidth = 0.8) +
+  geom_violin(data = (mono_deltas %>% filter(d_changed_bi)),
+              aes(x = delta_d_bi, y = "Bidirectional",
+                  color = "Bidirectional", fill = "Bidirectional"),
+              alpha = 0.8, linewidth = 0.8) +
+  # Pseudo-log scale
+  scale_x_continuous(name = "Distance Correction (m)",
+                     transform = transform_pseudo_log(sigma = 0.000001),
+                     labels = scales::label_comma(drop0trailing = TRUE),
+                     breaks = c(-1000, -100, -10, -1, -0.1, -0.01, -0.001, 0,
+                                0.001, 0.01, 0.1, 1, 10, 100, 1000)) +
+  # Format
+  scale_color_manual(name = "Correction\nDirection",
+                     values = c("Forward" = "darkred",
+                                "Bidirectional" = "navy")) +
+  scale_fill_manual(name = "Correction\nDirection",
+                     values = c("Forward" = my_r,
+                                "Bidirectional" = my_b)) +
+  theme_minimal() +
+  theme(plot.title.position = "plot") +
+  labs(title = "(A) Distances",
+       y = NULL)
+
+v_plot <- ggplot() +
+  # Add violines
+  geom_violin(data = (mono_deltas %>% filter(s_changed_for)),
+              aes(x = delta_s_for, y = "Forward",
+                  color = "Forward", fill = "Forward"),
+              alpha = 0.8, linewidth = 0.8) +
+  geom_violin(data = (mono_deltas %>% filter(s_changed_bi)),
+              aes(x = delta_s_bi, y = "Bidirectional",
+                  color = "Bidirectional", fill = "Bidirectional"),
+              alpha = 0.8, linewidth = 0.8) +
+  # Pseudo-log scale
+  scale_x_continuous(transform = transform_pseudo_log(sigma = 0.000001),
+                     breaks = c(c(-10, -1, -0.1, -0.01, -0.001, -0.0001,
+                                  0, 0.0001, 0.001, 0.01, 0.1, 1)),
+                     labels = label_comma(drop0trailing = TRUE),
+                     name = "Speed Correction (m/s)") +
+  # Format
+  scale_color_manual(name = "Correction\nDirection",
+                     values = c("Forward" = "darkred",
+                                "Bidirectional" = "navy")) +
+  scale_fill_manual(name = "Correction\nDirection",
+                     values = c("Forward" = my_r,
+                                "Bidirectional" = my_b)) +
+  theme_minimal() +
+  theme(plot.title.position = "plot") +
+  labs(title = "(B) Speeds",
+       y = NULL)
+
+mono_changes_combo <- d_plot + v_plot +
+  plot_layout(ncol = 1, nrow = 2,
+              guides = "collect", axes = "collect", axis_titles = "collect")
+mono_changes_combo
+```
+
+
+
+<img src="figures/figure_A2.png" alt="" width="100%" />
+
+The speed changes made in the two approaches are very similar, though the bidirectional makes some larger (~0.1-1 m/s) changes not made by the forward direction. The magnitude of distance changes is slightly smaller, but more importantly, becomes symmetrical for the bidirectional approach. Keep in mind that the width of these violin plots are determined *within* each direction level and are not comparable between directions.
+
+# Physical Realism
+
+We here evaluate how well the dataset aligns with our physical expectations of a bus's movements. Check our our main data evaluation vignette for a more thorough discussion of these methods.
+
+Defining our allowable physical ranges:
+
+
+``` r
+# Global cutoffs
+allowable_accel <- c(-0.24, 0.17) * 9.81 # g -> m/s2
+allowable_vel <- c(-Inf, 55) / 2.237 # mph -> m/s
+stop_cutoff <- 3 / 2.237 # mph -> m/s
+```
+
+Next, defining a function to evaluate these:
+
+
+``` r
+phys_eval <- function(distance_df, return_check = FALSE) {
+  
+  # Get point-wise speeds & check for point-wise violations
+  check_df <- distance_df %>%
+    # select only needed columns
+    select(location_ping_id, trip_id_performed, distance,
+           speed, event_timestamp) %>%
+    arrange(trip_id_performed, event_timestamp) %>%
+    group_by(trip_id_performed) %>%
+    # calculate dist, time deltas & implied speeds, accels
+    mutate(event_timestamp = as.numeric(event_timestamp),
+           cummax_dist = cummax(distance),
+           delta_dist = lead(distance) - (distance),
+           delta_t = lead(event_timestamp) - (event_timestamp),
+           delta_speed = lead(speed) - (speed),
+           implied_speed = delta_dist / delta_t,
+           implied_accel = delta_speed / delta_t) %>%
+    ungroup() %>%
+    # find violations
+    mutate(implied_speed = replace_na(implied_speed, 0), # first/last points
+           implied_accel = replace_na(implied_accel, 0), # first/last points
+           violate_mono = distance < cummax_dist,
+           violate_speed = (speed < allowable_vel[1]) |
+             (speed > allowable_vel[2]),
+           violate_implied_speed = (implied_speed < allowable_vel[1]) |
+             (implied_speed > allowable_vel[2]),
+           violate_implied_accel = (implied_accel < allowable_accel[1]) |
+             (implied_accel > allowable_accel[2]))
+  
+  # if want to return point-by-point check
+  if (return_check) {
+    return(check_df)
+  }
+  
+  # Get violations by trip
+  trips_df <- check_df %>%
+    select(-c(cummax_dist, delta_dist, delta_t, delta_speed,
+              location_ping_id)) %>%
+    group_by(trip_id_performed) %>%
+    summarize(n_obs = n(),
+              violate_mono_count = sum(violate_mono),
+              violate_speed_count = sum(violate_speed),
+              violate_implied_speed_count = sum(violate_implied_speed),
+              violate_implied_accel_count = sum(violate_implied_accel)) %>%
+    mutate(violate_mono = violate_mono_count > 0,
+           violate_speed = violate_speed_count > 0,
+           violate_implied_speed = violate_implied_speed_count > 0,
+           violate_implied_accel = violate_implied_accel_count > 0,
+           violate_any = violate_mono | violate_speed |
+             violate_implied_accel | violate_implied_speed)
+  
+  trip_summ <- trips_df %>%
+    summarize(n_trips = n(),
+              n_vio_mono = sum(violate_mono),
+              n_vio_speed = sum(violate_speed),
+              n_vio_implied_speed = sum(violate_implied_speed),
+              n_vio_implied_accel = sum(violate_implied_accel)) %>%
+    pivot_longer(cols = c("n_vio_mono",
+                          "n_vio_speed", "n_vio_implied_speed",
+                          "n_vio_implied_accel"),
+                 names_to = "Violation", values_to = "n_trips_vio") %>%
+    mutate(perc_trips_vio = n_trips_vio / n_trips,
+           perc_trips_vio = scales::percent(perc_trips_vio,
+                                            accuracy = 0.01),
+           Violation = case_when(
+             Violation == "n_vio_mono" ~ "Weak Monotonicity",
+             Violation == "n_vio_speed" ~ "Recorded Speed",
+             Violation == "n_vio_implied_speed" ~ "Implied Speed",
+             Violation == "n_vio_implied_accel" ~ "Implied Acceleration"
+           ),
+           n_trips = format(n_trips, big.mark = ",", scientific = FALSE),
+           n_trips_vio = format(n_trips_vio, big.mark = ",",
+                                scientific = FALSE))
+  
+  # Summarize point-wise violations
+  point_summ <- check_df %>%
+    select(-c(cummax_dist, delta_dist, delta_t, delta_speed,
+              location_ping_id)) %>%
+    summarize(n_obs = n(),
+              n_vio_mono = sum(violate_mono),
+              n_vio_speed = sum(violate_speed),
+              n_vio_implied_speed = sum(violate_implied_speed),
+              n_vio_implied_accel = sum(violate_implied_accel)) %>%
+    pivot_longer(cols = c("n_vio_mono",
+                          "n_vio_speed", "n_vio_implied_speed",
+                          "n_vio_implied_accel"),
+                 names_to = "Violation", values_to = "n_obs_vio") %>%
+    mutate(perc_obs_vio = n_obs_vio / n_obs,
+           perc_obs_vio = scales::percent(perc_obs_vio,
+                                          accuracy = 0.01),
+           Violation = case_when(
+             Violation == "n_vio_mono" ~ "Weak Monotonicity",
+             Violation == "n_vio_speed" ~ "Recorded Speed",
+             Violation == "n_vio_implied_speed" ~ "Implied Speed",
+             Violation == "n_vio_implied_accel" ~ "Implied Acceleration",
+           ),
+           n_obs = format(n_obs, big.mark = ",", scientific = FALSE),
+           n_obs_vio = format(n_obs_vio, big.mark = ",", scientific = FALSE))
+  
+  # join trips & points, return
+  summ <- left_join(x = trip_summ, y = point_summ,
+                    by = "Violation")
+  return(summ)
+}
+```
+
+Running the function & printing the results:
+
+
+``` r
+# Get raw & cleaned evaluations
+eval_phys <- bind_rows(
+  phys_eval(mono_forward_df) %>%
+    mutate(Direction = "Forward"),
+  phys_eval(mono_bidir_df) %>%
+    mutate(Direction = "Bidirectional")
+)
+
+# get trip & obs count
+n_trips <- unique(eval_phys$n_trips)
+n_obs <- unique(eval_phys$n_obs)
+cat(n_trips, " trips and ", n_obs, " AVL observations",
+    sep = "")
+#> 3,100 trips and 1,304,499 AVL observations
+
+# Make table pretty
+eval_phys_piv <- eval_phys %>%
+  select(-c(n_trips, n_obs, perc_obs_vio, perc_trips_vio)) %>%
+  pivot_wider(id_cols = "Violation",
+              names_from = Direction,
+              values_from = c("n_trips_vio", "n_obs_vio")) %>%
+  mutate(delta_trips = parse_number(n_trips_vio_Bidirectional) -
+           parse_number(n_trips_vio_Forward),
+         perc_trips = delta_trips / parse_number(n_trips_vio_Forward),
+         delta_obs = parse_number(n_obs_vio_Bidirectional) -
+           parse_number(n_obs_vio_Forward),
+         perc_obs = delta_obs / parse_number(n_obs_vio_Forward),
+         # Percents
+         perc_trips = percent(perc_trips, accuracy = 0.01),
+         perc_obs = percent(perc_obs, accuracy = 0.01),
+         perc_trips = replace_na(perc_trips, "0.00%"),
+         perc_obs = replace_na(perc_obs, "0.00%"),
+         n_trips_vio_Bidirectional = paste(n_trips_vio_Bidirectional,
+                                           " (", perc_trips, ")",
+                                           sep = ""),
+         n_obs_vio_Bidirectional = paste(n_obs_vio_Bidirectional,
+                                         " (", perc_obs, ")",
+                                         sep = "")) %>%
+  select(Violation, n_trips_vio_Forward, n_trips_vio_Bidirectional,
+         n_obs_vio_Forward, n_obs_vio_Bidirectional)
+
+# Print table
+knitr::kable(eval_phys_piv)
+```
+
+
+
+|Violation            |n_trips_vio_Forward |n_trips_vio_Bidirectional |n_obs_vio_Forward |n_obs_vio_Bidirectional |
+|:--------------------|:-------------------|:-------------------------|:-----------------|:-----------------------|
+|Weak Monotonicity    |0                   |0 (0.00%)                 |0                 |0 (0.00%)               |
+|Recorded Speed       |6                   |6 (0.00%)                 |7                 |7 (0.00%)               |
+|Implied Speed        |89                  |84 (-5.62%)               |91                |86 (-5.49%)             |
+|Implied Acceleration |1,430               |1,349 (-5.66%)            |3,009             |2,697 (-10.37%)         |
+
+
+
+
+
+The proposed bidirectional method improves both acceleration and implied speeds.
+
+# Data Source Alignment
+
+We have a dataset of automatic passenger counter (APC) data, `apc_df`, loaded into our `RStudio` environment. Check out our main data evaluation vignette for a more detailed discussion of this dataset.
+
+The function below matches an arbitrary AVL dataset (either cleaned, raw, or interpolated from a trajectory) to this APC dataset and checks whether this condition holds:
+
+
+``` r
+avl_apc_eval <- function(distance_df, apc_df) {
+
+  avl_df2 <- distance_df %>%
+    arrange(trip_id_performed, event_timestamp) %>%
+    group_by(trip_id_performed) %>%
+    mutate(stop_name = NA, inout = NA,
+           type = "AVL",
+           avl_min_t = min(event_timestamp),
+           avl_max_t = max(event_timestamp)) %>%
+    ungroup() %>%
+    select(trip_id_performed, event_timestamp, speed,
+           stop_name, inout, avl_min_t, avl_max_t, type)
+  
+  apc_stops_df <- apc_df %>%
+    filter(dwell > 0) %>%
+    select(trip_id_performed, t_in, t_out, stop_name) %>%
+    pivot_longer(cols = c("t_in", "t_out"),
+                 names_to = "inout", values_to = "event_timestamp") %>%
+    mutate(speed = NA,
+           type = "APC")
+
+  # bind together APC & AVL to find points
+  # can't join bc we also want to include one extra point
+  avl_apc <- bind_rows(avl_df2, apc_stops_df) %>%
+    # Keep only trips in both datasets
+    filter((trip_id_performed %in% apc_stops_df$trip_id_performed) &
+             (trip_id_performed %in% avl_df2$trip_id_performed)) %>%
+    # Remove APC rows occuring before or after a trip's AVL
+    arrange(trip_id_performed, event_timestamp) %>%
+    fill(avl_min_t, .direction = "updown", .by = trip_id_performed) %>%
+    fill(avl_max_t, .direction = "downup", .by = trip_id_performed) %>%
+    filter((event_timestamp >= avl_min_t) & (event_timestamp <= avl_max_t)) %>%
+    select(-c(avl_min_t, avl_max_t)) %>%
+    group_by(trip_id_performed) %>%
+    # fill in stop IDs between AVL timepoints
+    mutate(f_d = stop_name,
+           f_u = stop_name) %>%
+    fill(f_d, .direction = "down") %>%
+    fill(f_u, .direction = "up") %>%
+    ungroup() %>%
+    mutate(stop_name = if_else(f_d == f_u,
+                               f_d,
+                               false = NA)) %>%
+    select(-c(f_d, f_u)) %>%
+    # pull stop ID up one more
+    group_by(trip_id_performed) %>%
+    mutate(stop_name = case_when(
+      # if NA and next isn't NA, set to next
+      is.na(stop_name) & !is.na(lead(stop_name)) ~ lead(stop_name),
+      # if isn't NA, leave as is
+      !is.na(stop_name) ~ stop_name,
+      # otherwise, leave as NA
+      .default = NA
+    )) %>%
+    ungroup() %>%
+    # Remove timepoints not assigned to an APC period
+    filter(!is.na(stop_name) & type == "AVL") %>%
+    select(-c(type, inout))
+  
+  keep_trip_stops <- avl_apc %>%
+    distinct(trip_id_performed, stop_name) %>%
+    mutate(trip_stop = paste(trip_id_performed, stop_name, sep = "-")) %>%
+    pull(trip_stop)
+  
+  # get trajectory's data
+  # "uncount" APC dataframe by timestep
+  tstep <- 0.1
+  apc_uncount <- apc_df %>%
+    filter(dwell > 0) %>%
+    mutate(t_in = as.numeric(t_in),
+           t_out = as.numeric(t_out)) %>%
+    select(trip_id_performed, stop_name, t_in, t_out) %>%
+    mutate(trip_stop = paste(trip_id_performed, stop_name, sep = "-")) %>%
+    filter(trip_stop %in% keep_trip_stops) %>%
+    uncount(weights = pmax(1, floor((t_out - t_in) / tstep + 1))) %>%
+    group_by(trip_id_performed, stop_name) %>%
+    mutate(event_timestamp = seq(from = t_in[1],
+                                 to = t_out[1],
+                                 by = tstep)) %>%
+    ungroup() %>%
+    select(-c(t_in, t_out, trip_stop))
+  
+  # interpolate for speed values at these timepoints
+  traj <- get_trajectory_fun(distance_df = distance_df)
+  traj_apc <- predict(object = traj,
+                      new_times = apc_uncount,
+                      deriv = 1) %>%
+    rename(speed = interp) %>%
+    select(-deriv)
+  
+  # get evaluations
+  avl_eval <- avl_apc_summ(avl_apc) %>%
+    mutate(Violation = "AVL Points")
+  traj_eval <- avl_apc_summ(traj_apc) %>%
+    mutate(Violation = "Trajectory")
+  eval <- bind_rows(avl_eval, traj_eval)
+  
+  return(eval)
+}
+```
+
+Next, the following function summarizes results from matched AVL and APC data:
+
+
+``` r
+# helper function for final summary
+avl_apc_summ <- function(avl_apc) {
+  
+  avl_stops <- avl_apc %>%
+      group_by(trip_id_performed, stop_name) %>%
+      summarize(min_speed = min(speed),
+                .groups = "keep") %>%
+      mutate(makes_stop = min_speed < stop_cutoff)
+
+  # summary
+  point_summ <- avl_stops %>%
+    ungroup() %>%
+    summarize(n_apc_stops = n(),
+              n_avl_stops = sum(makes_stop)) %>%
+    pivot_longer(cols = c("n_avl_stops"),
+                 names_to = "Violation", values_to = "n_obs_matching") %>%
+    mutate(n_obs_vio = n_apc_stops - n_obs_matching,
+           perc_obs_vio = (n_obs_vio / n_apc_stops),
+           perc_obs_vio = scales::percent(perc_obs_vio,
+                                          accuracy = 0.01),
+           Violation = "APC Dwell",
+           n_apc_stops = format(n_apc_stops, big.mark = ",", scientific = FALSE),
+           n_obs_vio = format(n_obs_vio, big.mark = ",", scientific = FALSE)) %>%
+    select(-c(n_obs_matching)) %>%
+    rename(n_obs = n_apc_stops)
+  
+  trip_summ <- avl_stops %>%
+    ungroup() %>%
+    group_by(trip_id_performed) %>%
+    summarize(n_apc_stops = n(),
+              n_avl_stops = sum(makes_stop)) %>%
+    mutate(vio = n_avl_stops < n_apc_stops) %>%
+    summarize(n_trips = n(),
+              n_vio = sum(vio)) %>%
+    pivot_longer(cols = c("n_vio"),
+                 names_to = "Violation", values_to = "n_trips_vio") %>%
+    mutate(perc_trips_vio = n_trips_vio / n_trips,
+           perc_trips_vio = scales::percent(perc_trips_vio,
+                                            accuracy = 0.01),
+           Violation = "APC Dwell",
+           n_trips = format(n_trips, big.mark = ",", scientific = FALSE),
+           n_trips_vio = format(n_trips_vio, big.mark = ",", scientific = FALSE))
+  
+  # join trip, point summary & return
+  summ <- left_join(x = trip_summ, y = point_summ,
+                    by = "Violation")
+  return(summ)
+}
+```
+
+With this, we run the above function to evaluate the data quality across the raw AVL, the fully-cleaned monotonic AVL, and the fit trajectory:
+
+
+``` r
+# Get raw & cleaned evaluations
+data_eval <- bind_rows(
+  avl_apc_eval(distance_df = mono_forward_df, apc_df = apc_df) %>%
+    mutate(Direction = "Forward"),
+  avl_apc_eval(distance_df = mono_bidir_df, apc_df = apc_df) %>%
+    mutate(Direction = "Bidirectional")
+)
+
+# get trip & obs count
+n_trips <- unique(data_eval$n_trips)
+n_obs <- unique(data_eval$n_obs)
+cat(n_trips, " trips and ", n_obs, " AVL observations",
+    sep = "")
+#> 2,821 trips and 50,354 AVL observations
+
+# Make table pretty
+data_eval_piv <- data_eval %>%
+  select(-c(n_trips, n_obs, perc_obs_vio, perc_trips_vio)) %>%
+  pivot_wider(id_cols = "Violation",
+              names_from = Direction,
+              values_from = c("n_trips_vio", "n_obs_vio")) %>%
+  mutate(delta_trips = parse_number(n_trips_vio_Bidirectional) -
+           parse_number(n_trips_vio_Forward),
+         perc_trips = delta_trips / parse_number(n_trips_vio_Forward),
+         delta_obs = parse_number(n_obs_vio_Bidirectional) -
+           parse_number(n_obs_vio_Forward),
+         perc_obs = delta_obs / parse_number(n_obs_vio_Forward),
+         # Percents
+         perc_trips = percent(perc_trips, accuracy = 0.01),
+         perc_obs = percent(perc_obs, accuracy = 0.01),
+         perc_trips = replace_na(perc_trips, "0.00%"),
+         perc_obs = replace_na(perc_obs, "0.00%"),
+         n_trips_vio_Bidirectional = paste(n_trips_vio_Bidirectional,
+                                           " (", perc_trips, ")",
+                                           sep = ""),
+         n_obs_vio_Bidirectional = paste(n_obs_vio_Bidirectional,
+                                         " (", perc_obs, ")",
+                                         sep = "")) %>%
+  select(Violation, n_trips_vio_Forward, n_trips_vio_Bidirectional,
+         n_obs_vio_Forward, n_obs_vio_Bidirectional)
+
+# Print table
+knitr::kable(data_eval_piv)
+```
+
+
+
+|Violation  |n_trips_vio_Forward |n_trips_vio_Bidirectional |n_obs_vio_Forward |n_obs_vio_Bidirectional |
+|:----------|:-------------------|:-------------------------|:-----------------|:-----------------------|
+|AVL Points |590                 |592 (0.34%)               |793               |796 (0.38%)             |
+|Trajectory |452                 |453 (0.22%)               |572               |574 (0.35%)             |
+
+
+
+
+
+The proposed method does not seem to meaningfully change data alignment; both trajectories and AVL points have slight increases in violations.
+
+# Prediction
+
+The final evaluation we perform is of prediction quality. Check out our dedicated data evaluation vignette for a more detailed description of these methods.
+
+## Methods
+
+### Initial Cleaning & Filtering
+
+Now we can find the list of pings (identified by their `location_ping_id`) and trips (identified by their unique `trip_id_performed`) to keep in the initial cross-validation dataset.
+
+
+``` r
+keep_pings <- c(s6$location_ping_id,
+                s4_remov)
+```
+
+Next, we'll find the trips we want to keep.
+
+
+``` r
+avl_summ <- avl_df %>%
+  filter(location_ping_id %in% keep_pings) %>%
+  group_by(trip_id_performed) %>%
+  summarize(t_min = min(event_timestamp),
+            t_max = max(event_timestamp),
+            t = as.numeric(t_max) - as.numeric(t_min),
+            n_obs = n(),
+            freq = t / n_obs)
+keep_trips <- avl_summ %>%
+  filter((n_obs > 1) & (freq < 7)) %>%
+  pull(trip_id_performed)
+
+paste(length(keep_trips), " trips",
+      sep = "")
+#> [1] "1162 trips"
+```
+
+Using the trips and points we wish to retain, we'll finalize our cleaned, initial dataset.
+
+
+``` r
+base_df <- s3 %>%
+  filter((trip_id_performed %in% keep_trips) &
+           (location_ping_id %in% keep_pings)) %>%
+  select(event_timestamp, trip_id_performed, distance, speed, location_ping_id)
+```
+
+### Implementation
+  
+Below we begin by defining the folding function.
+
+
+``` r
+base_freq <- 5 # avg ping frequency
+
+cv_fold <- function(test_freq, offset) {
+  keep_mod <- test_freq / base_freq
+
+  train_df <- base_df %>%
+    group_by(trip_id_performed) %>%
+    mutate(row = row_number() + offset) %>%
+    filter((row %% keep_mod) == 0) %>%
+    ungroup()
+  test_df <- base_df %>%
+    filter(!(location_ping_id %in% train_df$location_ping_id))
+
+  return(list(train_df,
+              test_df))
+}
+```
+
+Next we define our cleaning process.
+
+
+``` r
+clean_avl <- function(train_df) {
+
+  # Step 4
+  s4 <- clean_jumps(distance_df = train_df)
+
+  # Step 5
+  s5 <- trim_trips(distance_df = s4)
+
+  # Step 6
+  s6 <- clean_incomplete_trips(distance_df = s5,
+                               min_trip_distance = min_dist,
+                               min_trip_duration = min_dur,
+                               max_distance_gap = max_d_gap)
+
+  return(s6)
+}
+```
+
+Finally, we'll define a function to calculate our residuals. The original method has to handle linear trajectories as well; that is not the case here.
+
+
+``` r
+# Find current trajectory's deviation from base data
+traj_err <- function(traj, test_df, test_freq, offset, deriv, fit_df = NULL) {
+
+  # Get calculated traj
+  # also filters test data to only those between observed train data points
+  calc_df <- predict(object = traj,
+                     new_times = (test_df %>%
+                       select(event_timestamp, trip_id_performed, location_ping_id)),
+                     deriv = deriv)
+  pivot_df <- calc_df %>%
+      pivot_wider(id_cols = c("location_ping_id"),
+                  names_from = "deriv", names_glue = "interp_{.name}",
+                  values_from = "interp") %>%
+      rename(traj_dist = interp_0,
+             traj_speed = interp_1)
+
+  # Keep only pings in range of reconstructed traj
+  obs_df <- base_df %>%
+    filter(location_ping_id %in% pivot_df$location_ping_id)
+
+  # Final linear (1D) residuals
+  res_1D_df <- obs_df %>%
+    left_join(pivot_df, by = "location_ping_id") %>%
+    mutate(res_dist_1D = distance - traj_dist,
+           res_speed = speed - traj_speed) %>%
+    filter(!(is.na(res_dist_1D)) &
+             !(is.na(res_speed))) %>%
+    mutate(freq = test_freq,
+           off = offset)
+
+  return(res_1D_df)
+}
+```
+
+Those three functions are the bulk of the work we need. We'll set up a nested for loop to cycle through each simulated frequency, then within each offset in that frequency. Here, we'll only evaluate the low frequencies (10 through 30 seconds).
+
+
+``` r
+test_freqs <- c(10, 15, 20, 25, 30)
+res_list <- list()
+
+for (freq in test_freqs) {
+  print(paste("Current freq: ", freq, " s",
+              sep = ""))
+
+  offsets <- 0:((freq / base_freq) - 1)
+
+  for (off in offsets) {
+    print(paste("Current offset: ", off + 1, " of ", max(offsets) + 1,
+                sep = ""))
+
+    # Pull data
+    current_fold <- cv_fold(test_freq = freq,
+                            offset = off)
+    train_df <- current_fold[[1]]
+    test_df <- current_fold[[2]]
+
+    # AVL cleaning
+    current_df <- clean_avl(train_df = train_df)
+    
+    # Fit forward & bidir monotonic corrections
+    bidir_df <- make_monotonic(distance_df = current_df,
+                              correct_speed = TRUE,
+                              add_distance_error = dist_error,
+                              direction = "bidirectional")
+    for_df <- make_monotonic(distance_df = current_df,
+                              correct_speed = TRUE,
+                              add_distance_error = dist_error,
+                              direction = "forward")
+
+    # Trajectory fitting
+    traj_bidir <- get_trajectory_fun(distance_df = bidir_df)
+    traj_for <- get_trajectory_fun(distance_df = for_df)
+
+    # Error residuals
+    bidir_res <- traj_err(traj = traj_bidir,
+                          test_df = test_df,
+                          test_freq = freq,
+                          offset = off,
+                          deriv = c(0, 1))
+    for_res <- traj_err(traj = traj_for,
+                        test_df = test_df,
+                        test_freq = freq,
+                        offset = off,
+                        deriv = c(0, 1))
+    current_res <- rbind(
+      bidir_res %>% mutate(method = "Bidirectional"),
+      for_res %>% mutate(method = "Forward")
+    )
+
+    res_list[[paste(freq, off, sep = "-")]] <- current_res
+  }
+}
+
+# Bind all residuals into a single dataframe
+res <- bind_rows(res_list)
+```
+
+
+
+We can now create some summary tables.
+
+
+
+
+``` r
+# Base summary
+summ <- res %>%
+  mutate(SE_dist_1D = res_dist_1D^2,
+         SE_speed = res_speed^2) %>%
+  group_by(method, freq) %>%
+  summarize(mean_1D_error = mean(res_dist_1D),
+            mean_speed_error = mean(res_speed),
+            n_test_obs = n(),
+            trips = length(unique(trip_id_performed)),
+            SSE_dist_1D = sum(SE_dist_1D),
+            SSE_speed = sum(SE_speed),
+            .groups = "keep") %>%
+  ungroup() %>%
+  mutate(MSE_dist_1D = SSE_dist_1D / n_test_obs,
+         MSE_speed = SSE_speed / n_test_obs,
+         RMSE_dist_1D = sqrt(MSE_dist_1D),
+         RMSE_speed = sqrt(MSE_speed),
+         method = factor(method, levels = c("Forward", "Bidirectional")))
+
+# Cleaned summary
+summ_clean <- summ %>%
+  mutate(rmse_1d = sprintf(RMSE_dist_1D, fmt = "%.2f"),
+         rmse_speed = sprintf(RMSE_speed, fmt = "%.2f")) %>%
+  arrange(freq, method) %>%
+  mutate(delta_d = RMSE_dist_1D - lag(RMSE_dist_1D),
+         delta_v = RMSE_speed - lag(RMSE_speed),
+         perc_d = delta_d / lag(RMSE_dist_1D),
+         perc_v = delta_v / lag(RMSE_speed),
+         perc_v = replace_na(perc_v, 0),
+         perc_d = replace_na(perc_d, 0),
+         perc_d = percent(perc_d, accuracy = 0.01),
+         perc_v = percent(perc_v, accuracy = 0.01),
+         rmse_1d = case_when(
+           method == "Bidirectional" ~ paste(rmse_1d, " (",
+                                             perc_d, ")",
+                                             sep = ""),
+           .default = rmse_1d
+         ),
+         rmse_speed = case_when(
+           method == "Bidirectional" ~ paste(rmse_speed, " (",
+                                             perc_v, ")",
+                                             sep = ""),
+           .default = rmse_speed
+         ),
+         trips = format(trips, big.mark = ",", scientific = FALSE)) %>%
+  select(freq, method, trips,
+         rmse_1d, rmse_speed,
+         ) %>%
+  rename(`RMSE of Distance (m)` = rmse_1d,
+         `RMSE of Speed (m/s)` = rmse_speed,
+         `Simulated Frequency (sec)` = freq,
+         `Method` = method,
+         `Number of Trips` = trips)
+
+knitr::kable(summ_clean)
+```
+
+
+
+| Simulated Frequency (sec)|Method        |Number of Trips |RMSE of Distance (m) |RMSE of Speed (m/s) |
+|-------------------------:|:-------------|:---------------|:--------------------|:-------------------|
+|                        10|Forward       |1,162           |8.10                 |1.15                |
+|                        10|Bidirectional |1,162           |6.10 (-24.70%)       |1.15 (-0.40%)       |
+|                        15|Forward       |1,159           |9.14                 |1.16                |
+|                        15|Bidirectional |1,159           |7.56 (-17.24%)       |1.16 (-0.14%)       |
+|                        20|Forward       |1,147           |10.86                |1.32                |
+|                        20|Bidirectional |1,147           |9.65 (-11.15%)       |1.32 (-0.05%)       |
+|                        25|Forward       |1,141           |13.33                |1.55                |
+|                        25|Bidirectional |1,141           |12.40 (-6.95%)       |1.55 (-0.03%)       |
+|                        30|Forward       |1,127           |16.50                |1.81                |
+|                        30|Bidirectional |1,127           |15.79 (-4.30%)       |1.81 (-0.02%)       |
+
+
+
+
+
+The proposed bidirectional approach substantially reduces prediction RMSE.
+
+# Session Information
+
+
+``` r
+# Print version of R
+version
+#>                _                                
+#> platform       x86_64-w64-mingw32               
+#> arch           x86_64                           
+#> os             mingw32                          
+#> crt            ucrt                             
+#> system         x86_64, mingw32                  
+#> status                                          
+#> major          4                                
+#> minor          6.2                              
+#> year           2026                             
+#> month          10                               
+#> day            29                               
+#> svn rev        90784                            
+#> language       R                                
+#> version.string R version 4.6.2 (2026-10-29 ucrt)
+#> nickname       Diversified Portfolio
+
+# Print versions of all loaded packages
+sessionInfo()
+#> R version 4.6.2 (2026-10-29 ucrt)
+#> Platform: x86_64-w64-mingw32/x64
+#> Running under: Windows 11 x64 (build 26200)
+#> 
+#> Matrix products: default
+#>   LAPACK version 3.12.1
+#> 
+#> locale:
+#> [1] LC_COLLATE=English_United States.utf8  LC_CTYPE=English_United States.utf8    LC_MONETARY=English_United States.utf8 LC_NUMERIC=C                           LC_TIME=English_United States.utf8    
+#> 
+#> time zone: America/Chicago
+#> tzcode source: internal
+#> 
+#> attached base packages:
+#> [1] stats     graphics  grDevices utils     datasets  methods   base     
+#> 
+#> other attached packages:
+#>  [1] scales_1.4.0      marquee_1.2.1     patchwork_1.3.2   lubridate_1.9.5   forcats_1.0.1     stringr_1.6.0     dplyr_1.2.1       purrr_1.2.2       readr_2.2.0       tidyr_1.3.2       tibble_3.3.1      ggplot2_4.0.3     tidyverse_2.0.0   transittraj_1.2.0
+#> 
+#> loaded via a namespace (and not attached):
+#>  [1] utf8_1.2.6         generics_0.1.4     class_7.3-24       geos_0.2.5         KernSmooth_2.23-27 stringi_1.8.9      hms_1.1.4          digest_0.6.39      magrittr_2.0.5     evaluate_1.0.5     grid_4.6.2         timechange_0.4.0   RColorBrewer_1.1-3 fastmap_1.2.0      slider_0.3.3       e1071_1.7-17       DBI_1.3.0          bench_1.1.4        libgeos_3.11.1-3   codetools_0.2-20   cli_3.6.6          rlang_1.3.0        units_1.0-1        ivs_0.2.0          withr_3.0.3        yaml_2.3.12        otel_0.3.0         tools_4.6.2        tzdb_0.5.0         vctrs_0.7.3        R6_2.6.1           proxy_0.4-29       lifecycle_1.0.5    classInt_0.4-11    warp_0.2.3         pkgconfig_2.0.3    terra_1.9-50       pillar_1.11.1      gtable_0.3.6       Rcpp_1.1.2         glue_1.8.1         sf_1.1-3           xfun_0.62          tidyselect_1.2.1   rstudioapi_0.19.0  knitr_1.52         farver_2.1.2       htmltools_0.5.9    rmarkdown_2.32     wk_0.9.5           compiler_4.6.2     S7_0.2.2
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+asd

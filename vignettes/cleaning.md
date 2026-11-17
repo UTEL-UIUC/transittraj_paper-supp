@@ -32,6 +32,8 @@ library(tidyverse)
 # For plotting
 library(marquee)
 library(patchwork)
+library(ggbeeswarm)
+library(scales)
 ```
 
 Next, we'll set some parameters for our visualizations:
@@ -89,7 +91,9 @@ We'll begin by quickly exploring the average polling frequencies by each trip. B
 # Get initial dims
 n_obs <- dim(avl_df)[1]
 n_trips <- length(unique(avl_df$trip_id_performed))
-dur <- list()
+dur <- list() # for individual step median durations
+bm <- list() # for full benchmarking results
+bm_times <- list() # for benchmarking individual iteration times
 
 # Polling
 bin_width <- 2.5 # sec
@@ -148,8 +152,19 @@ steps12 <- bench::mark(
   time_unit = "s", check = TRUE, iterations = bench_iter, min_time = Inf
 )
 #> Warning: Some expressions had a GC in every iteration; so filtering is disabled.
+
+# Benchmarking
 distance_df <- steps12$result[[1]] %>% filter(distance < 20500)
 dur[["1 & 2"]] <- steps12[,1:8]
+bm[["1 & 2"]] <- data.frame(
+  min_t = steps12$min,
+  med_t = steps12$median,
+  mem_alloc = as.character(steps12$mem_alloc),
+  ngc = steps12$n_gc
+)
+bm_times[["1 & 2"]] <- data.frame(
+  t = as.numeric(steps12$time[[1]])
+)
 
 # Save changes
 n_obs <- append(n_obs,
@@ -173,8 +188,20 @@ step3 <- bench::mark(
   # benchmark
   time_unit = "s", check = TRUE, iterations = bench_iter, min_time = Inf
 )
+#> Warning: Some expressions had a GC in every iteration; so filtering is disabled.
+
+# Benchmarking
 step3_df <- step3$result[[1]]
 dur[["3"]] <- step3[,1:8]
+bm[["3"]] <- data.frame(
+  min_t = step3$min,
+  med_t = step3$median,
+  mem_alloc = as.character(step3$mem_alloc),
+  ngc = step3$n_gc
+)
+bm_times[["3"]] <- data.frame(
+  t = as.numeric(step3$time[[1]])
+)
 
 # Save changes
 n_obs <- append(n_obs,
@@ -187,7 +214,7 @@ Next, plot our example:
 
 
 ``` r
-plot_trip <- "2024-09-12-t3B2-b232A-sl3-N"
+plot_trip <- "2024-12-13-t3A7-b232C-sl3-N"
 plot_df <- distance_df %>%
   filter(trip_id_performed == plot_trip) %>%
   mutate(subtrip_id = paste(trip_id_performed, operator_id, vehicle_id,
@@ -201,17 +228,17 @@ step3_plot <- ggplot(data = plot_df) +
   geom_line(aes(x = event_timestamp, y = distance, color = op_veh),
             linewidth = 2, alpha = 0.6) +
   geom_point(aes(x = event_timestamp, y = distance, color = op_veh),
-            size = 0.8, alpha = 1) +
+            size = 0.5, alpha = 1) +
   scale_color_manual(name = "Operator,\nVehicle ID",
-                     values = c("10342, 1981" = "#f43155",
-                                "2339, 2393" = "#2f6ff8")) +
+                     values = c("11078, 2493" = "#f43155",
+                                "11436, 1988" = "#2f6ff8")) +
   scale_linetype_manual(name = "Features",
                         values = c("BRT Stops" = "dashed")) +
-  ylim(c(0, 12500)) +
-  xlim(c(as.POSIXct("2024-09-12 09:45:00", tz = "America/New_York"),
-         as.POSIXct("2024-09-12 10:23:00", tz = "America/New_York"))) +
+  ylim(c(5000, 11000)) +
+  xlim(c(as.POSIXct("2024-12-13 09:44:00", tz = "America/New_York"),
+         as.POSIXct("2024-12-13 10:10:00", tz = "America/New_York"))) +
   theme_minimal() +
-  labs(x = "Time (morning of 9/12/24)",
+  labs(x = "Time (morning of 12/13/24)",
        y = "Distance from Beginning(m)",
        title = "(B) Sub-Trips in AVL: `clean_overlapping_subtrips()`",
        subtitle = paste("IndyGo Red Line 90 NB; Trip ID ", plot_trip,
@@ -240,8 +267,19 @@ step4 <- bench::mark(
   time_unit = "s", check = TRUE, iterations = bench_iter, min_time = Inf
 )
 #> Warning: Some expressions had a GC in every iteration; so filtering is disabled.
+
+# Benchmarking
 step4_df <- step4$result[[1]]
 dur[["4"]] <- step4[,1:8]
+bm[["4"]] <- data.frame(
+  min_t = step4$min,
+  med_t = step4$median,
+  mem_alloc = as.character(step4$mem_alloc),
+  ngc = step4$n_gc
+)
+bm_times[["4"]] <- data.frame(
+  t = as.numeric(step4$time[[1]])
+)
 
 # Save changes
 n_obs <- append(n_obs,
@@ -257,39 +295,41 @@ Next, plot our example:
 outliers <- clean_jumps(distance_df = step3_df,
                         t_cutoff = hampel_t,
                         return_removals = TRUE)
-plot_trip <- "2024-09-10-t73A-b2337-sl3-N"
+plot_trip <- "2024-12-09-t3FC-b2332-sl3-N"
 plot_df <- step3_df %>%
   filter(trip_id_performed == plot_trip) %>%
-  filter((distance >= 14000) & (distance <= 14380)) %>%
-  select(event_timestamp, distance, location_ping_id) %>%
-  mutate(point_ok = if_else(condition = (location_ping_id %in% outliers$location_ping_id),
+  filter((distance >= 15050) & (distance <= 15300)) %>%
+  select(event_timestamp, distance, location_ping_id, speed) %>%
+  mutate(point_ok = if_else(condition =
+                              (location_ping_id %in% outliers$location_ping_id),
                             true = "Outlier",
                             false = "Ok"))
-window_bounds <- data.frame(x = c(as.POSIXct("2024-09-10 19:36:28.7", tz = "America/New_York"),
-                                  as.POSIXct("2024-09-10 19:37:18.5", tz = "America/New_York")),
-                            med = c(14157.86, 14157.86)) %>%
-  mutate(upr = med + (hampel_t * 2.69 * 1.48),
-         lwr = med - (hampel_t * 2.69 * 1.48))
-lab_df <- data.frame(y = 14290,
+window_bounds <- data.frame(x = c(as.POSIXct("2024-12-09 11:04:40",
+                                             tz = "America/New_York"),
+                                  as.POSIXct("2024-12-09 11:05:14",
+                                             tz = "America/New_York")),
+                            med = c(15174.67, 15174.67)) %>%
+  mutate(upr = med + (hampel_t * 0.535 * 1.48),
+         lwr = med - (hampel_t * 0.535 * 1.48))
+lab_df <- data.frame(y = 15110,
                      x = mean(window_bounds$x),
-                     lab = paste("*At AVL Ping ID 2012804*",
-                                 "**Window Median**: 14158 m",
-                                 "**Median Absolute Deviation**: 2.7 m",
-                                 "**Distance from Median**: 55 m",
+                     lab = paste("*At AVL Ping ID 1880606*",
+                                 "**Window Median**: 15175 m",
+                                 "**Median Absolute Deviation**: 0.5 m",
+                                 "**Distance from Median**: 30.3 m",
                                  sep = "  \n"))
 step4_plot <- ggplot(data = plot_df) +
   geom_vline(data = window_bounds,
              aes(xintercept = x, linetype = "Window Bounds"),
              color = "grey50", linewidth = 0.8) +
+  geom_rect(data = window_bounds,
+            aes(xmin = x[1], xmax = x[2],
+                ymin = lwr[1], ymax = upr[1],
+                linetype = "Acceptable Range"),
+            color = NULL, fill = my_g, alpha = 0.3) +
   geom_line(data = window_bounds,
             aes(x = x, y = med, linetype = "Window Median"),
-            color = "grey20", linewidth = 1.4) +
-  geom_line(data = window_bounds,
-            aes(x = x, y = lwr, linetype = "Acceptable Range"),
-            color = "grey40", linewidth = 1) +
-  geom_line(data = window_bounds,
-            aes(x = x, y = upr, linetype = "Acceptable Range"),
-            color = "grey40", linewidth = 1) +
+            color = "grey20", linewidth = 0.5) +
   geom_point(aes(x = event_timestamp, y = distance,
                  color = point_ok, shape = point_ok),
              size = 2.5, stroke = 3, alpha = 0.9) +
@@ -302,14 +342,14 @@ step4_plot <- ggplot(data = plot_df) +
   scale_linetype_manual(name = "Median Filter",
                         values = c("Window Bounds" = "dotted",
                                    "Window Median" = "dotdash",
-                                   "Acceptable Range" = "longdash")) +
+                                   "Acceptable Range" = "solid")) +
   geom_marquee(data = lab_df,
                aes(x = x, y = y, label = lab),
                color = "firebrick", size = 3, hjust = 0.5,
-               style = marquee_label("firebrick"), fill = "white", alpha = 1,
-               family = "Verdana") +
+               style = marquee_label("firebrick"),
+               fill = "white", alpha = 1) +
   theme_minimal() +
-  labs(x = "Time (evening of 9/10/24)",
+  labs(x = "Time (morning of 12/9/24)",
        y = "Distance from Beginning (m)",
        title = "(C) Jump in AVL: `clean_jumps()`",
        subtitle = paste("IndyGo Red Line 90 NB; Trip ID ", plot_trip,
@@ -329,7 +369,7 @@ First, run the step:
 
 
 ``` r
-# - Step 5: Clean insufficient trips -
+# - Step 5: Trim trip tails/deadheads -
 step5 <- bench::mark(
   # transittraj
   step5 = trim_trips(distance_df = step4_df,
@@ -379,8 +419,20 @@ step5 <- bench::mark(
 #> Removing the following: 2024-11-22-t325-b2331-sl3-N, 2024-11-25-t803-b2335-sl3-N, 2024-12-05-t60E-b2334-sl3-N, 2024-12-12-t84D-b233C-sl3-N, 2024-12-31-t5-b233D-sl3-N
 #> Trips found with maximum at or before minimum point -- potential wrong direction.
 #> Removing the following: 2024-11-22-t325-b2331-sl3-N, 2024-11-25-t803-b2335-sl3-N, 2024-12-05-t60E-b2334-sl3-N, 2024-12-12-t84D-b233C-sl3-N, 2024-12-31-t5-b233D-sl3-N
+#> Warning: Some expressions had a GC in every iteration; so filtering is disabled.
+
+# Benchmarking
 step5_df <- step5$result[[1]]
 dur[["5"]] <- step5[,1:8]
+bm[["5"]] <- data.frame(
+  min_t = step5$min,
+  med_t = step5$median,
+  mem_alloc = as.character(step5$mem_alloc),
+  ngc = step5$n_gc
+)
+bm_times[["5"]] <- data.frame(
+  t = as.numeric(step5$time[[1]])
+)
 
 # Save changes
 n_obs <- append(n_obs,
@@ -396,11 +448,12 @@ Next, plot our example:
 trimmed <- trim_trips(distance_df = step4_df,
                       trim_type = "both",
                       return_removals = TRUE)
-plot_trip <- "2024-09-16-t44D-b2332-sl3-N"
+plot_trip <- "2024-11-01-t59B-b2337-sl3-N"
 plot_df5 <- step4_df %>%
   filter(trip_id_performed == plot_trip) %>%
   filter(distance < 7250) %>%
-  mutate(point_ok = if_else(condition = (location_ping_id %in% trimmed$location_ping_id),
+  mutate(point_ok = if_else(condition = (location_ping_id %in%
+                                           trimmed$location_ping_id),
                             true = "Trim",
                             false = "Ok"))
 lab_df <- plot_df5 %>%
@@ -413,11 +466,11 @@ lab_df <- plot_df5 %>%
                                                 format = "%H:%M:%S",
                                                 tz = "America/New_York"),
                      sep = ""),
-         x1 = as.POSIXct("2024-09-16 10:51:00",
+         x1 = as.POSIXct("2024-11-01 14:38:13",
                          tz = "America/New_York"),
-         x2 = as.POSIXct("2024-09-16 10:48:00",
+         x2 = as.POSIXct("2024-11-01 14:40:13",
                          tz = "America/New_York"),
-         y1 = 3500,
+         y1 = 4000,
          y2 = distance + 100) %>%
   select(-c(location_ping_id, event_timestamp, distance))
 step5_plot <- ggplot(data = plot_df5) +
@@ -431,12 +484,12 @@ step5_plot <- ggplot(data = plot_df5) +
                                 "Ok" = "#2f6ff8")) +
   geom_label(data = (stops %>% filter((distance <= 7250))),
              aes(x = max(plot_df5$event_timestamp), y = distance, label = stop_name),
-             hjust = "right", size = 2.7, color = "grey30", alpha = 0.9,
-             family = "Verdana") +
+             hjust = "right", size = 2.7, color = "grey30", alpha = 0.9) +
   geom_marquee(data = lab_df,
                aes(x = x1, y = y1, label = lab),
-               hjust = 0, color = "firebrick", size = 3.1, fill = "#FFFFFFE6",
-               family = "Verdana", style = marquee_label("firebrick")) +
+               hjust = 0.5, vjust = 0,
+               color = "firebrick", size = 3.1, fill = "#FFFFFFE6",
+               style = marquee_label("firebrick")) +
   geom_segment(data = lab_df,
                aes(x = x1, xend = x2,
                    y = y1, yend = y2),
@@ -449,7 +502,7 @@ step5_plot <- ggplot(data = plot_df5) +
   labs(title = "(D) Deadhead to Trim in AVL: `trim_trips()`",
        subtitle = paste("IndyGo Red Line 90 NB; Trip ID ", plot_trip,
                         sep = ""),
-       x = "Time (morning of 9/16/24)",
+       x = "Time (afternoon of 11/1/24)",
        y = "Distance from Beginning (m)") +
   theme(plot.title = element_marquee(style = code_style),
         plot.title.position = "plot")
@@ -477,8 +530,19 @@ step6 <- bench::mark(
   time_unit = "s", check = TRUE, iterations = bench_iter, min_time = Inf
 )
 #> Warning: Some expressions had a GC in every iteration; so filtering is disabled.
+
+# Benchmarking
 step6_df <- step6$result[[1]]
 dur[["6"]] <- step6[,1:8]
+bm[["6"]] <- data.frame(
+  min_t = step6$min,
+  med_t = step6$median,
+  mem_alloc = as.character(step6$mem_alloc),
+  ngc = step6$n_gc
+)
+bm_times[["6"]] <- data.frame(
+  t = as.numeric(step6$time[[1]])
+)
 
 # Save changes
 n_obs <- append(n_obs,
@@ -491,34 +555,34 @@ Next, plot our example:
 
 
 ``` r
-plot_trip <- "2024-09-17-t4B1-b2333-sl3-N"
+plot_trip <- "2024-11-01-t59B-b2337-sl3-N"
 plot_df6 <- step5_df %>%
   filter(trip_id_performed == plot_trip) %>%
-  filter((distance >= 7000) & (distance <= 11000))
-lab_df <- data.frame(lab = "**Distance gap**: 844 m",
-                     y = 9060,
-                     x = as.POSIXct("2024-09-17 12:32:00", tz = "America/New_York"))
+  filter((distance >= 5000) & (distance <= 9000))
+lab_df <- data.frame(lab = "**Distance gap**: 1,020 m",
+                     y = 7500,
+                     x = as.POSIXct("2024-11-01 15:04:00",
+                                    tz = "America/New_York"))
 
 step6_plot <- ggplot(data = plot_df6) +
-  geom_hline(data = (stops %>% filter((distance >= 7000) & (distance <= 11000))),
+  geom_hline(data = (stops %>% filter((distance >= 5000) & (distance <= 9000))),
              aes(yintercept = distance, linetype = "BRT Stops"),
              color = "grey40", linewidth = 0.6) +
   geom_line(aes(x = event_timestamp, y = distance),
             linewidth = 1.5, color = "firebrick", alpha = 0.6) +
   geom_point(aes(x = event_timestamp, y = distance),
              size = 1.5, color = "firebrick4") +
-  geom_label(data = (stops %>% filter((distance >= 7000) & (distance <= 11000))),
+  geom_label(data = (stops %>% filter((distance >= 5000) & (distance <= 9000))),
              aes(x = plot_df6$event_timestamp[1], y = distance, label = stop_name),
-             hjust = "left", nudge_y = 0, size = 2.8, color = "grey30", alpha = 0.9,
-             family = "Verdana") +
+             hjust = "left", nudge_y = 0, size = 2.8, color = "grey30", alpha = 0.9) +
   geom_marquee(data = lab_df,
                aes(x = x, y = y, label = lab),
-               hjust = 0, color = "firebrick", size = 3.6, fill = "#FFFFFFE6",
-               family = "Verdana", style = marquee_label("firebrick")) +
+               hjust = 0.5, color = "firebrick", size = 3.6, fill = "#FFFFFFE6",
+               style = marquee_label("firebrick")) +
   scale_linetype_manual(name = "Features",
                         values = c("BRT Stops" = "dashed")) +
   theme_minimal() +
-  labs(x = "Time (afternoon of 9/17/24)",
+  labs(x = "Time (afternoon of 11/1/24)",
        y = "Distance from Beginning (m)",
        title = "(E) Gap in AVL: `clean_incomplete_trips()`",
        subtitle = paste("IndyGo Red Line 90 NB; Trip ID ", plot_trip,
@@ -543,13 +607,25 @@ step7 <- bench::mark(
   # transittraj
   step7 = make_monotonic(distance_df = step6_df,
                          correct_speed = TRUE,
-                         add_distance_error = dist_error),
+                         add_distance_error = dist_error,
+                         direction = "bidirectional"),
   # benchmark
   time_unit = "s", check = TRUE, iterations = bench_iter, min_time = Inf
 )
 #> Warning: Some expressions had a GC in every iteration; so filtering is disabled.
+
+# Benchmarking
 step7_df <- step7$result[[1]]
 dur[["7"]] <- step7[,1:8]
+bm[["7"]] <- data.frame(
+  min_t = step7$min,
+  med_t = step7$median,
+  mem_alloc = as.character(step7$mem_alloc),
+  ngc = step7$n_gc
+)
+bm_times[["7"]] <- data.frame(
+  t = as.numeric(step7$time[[1]])
+)
 
 # Save changes
 n_obs <- append(n_obs,
@@ -562,22 +638,23 @@ Next, plot our example:
 
 
 ``` r
-plot_trip <- "2024-09-10-t73A-b2337-sl3-N"
+plot_trip <- "2024-11-19-t79F-b2339-sl3-N"
 plot_df1 <- step6_df %>%
   filter(trip_id_performed == plot_trip) %>%
-  filter((distance >= 14000) & (distance <= 14320)) %>%
+  filter((distance >= 11800) & (distance <= 12005)) %>%
   mutate(speed_lab = if_else(condition = (distance == min(distance)),
                              true = paste(round(speed, 1), " m/s", sep = ""),
                              false = paste(round(speed, 1))))
 plot_df2 <- step7_df %>%
   filter(trip_id_performed == plot_trip) %>%
-  filter((distance >= 14000) & (distance <= 14320)) %>%
+  filter((distance >= 11800) & (distance <= 12005)) %>%
   mutate(speed_lab = if_else(condition = (distance == min(distance)),
                              true = paste(round(speed, 1), " m/s", sep = ""),
                              false = paste(round(speed, 1))))
 
 step7_plot <- ggplot(data = plot_df1) +
-  geom_hline(data = (stops %>% filter((distance >= 14000) & (distance <= 14320))),
+  geom_hline(data = (stops %>% filter((distance >= 11800) &
+                                        (distance <= 12005))),
              aes(yintercept = distance, linetype = "BRT Stops"),
              color = "grey40", linewidth = 0.8) +
   geom_point(aes(x = event_timestamp, y = distance,
@@ -589,26 +666,26 @@ step7_plot <- ggplot(data = plot_df1) +
              size = 2.3, stroke = 2, alpha = 1, shape = 21) +
   geom_label(aes(x = event_timestamp, y = distance,
                  color = "Original", label = speed_lab),
-             nudge_y = -25, size = 2, alpha = 0.9, show.legend = FALSE,
-             family = "Verdana") +
+             nudge_y = -20, size = 2, alpha = 0.9, show.legend = FALSE) +
   geom_label(data = plot_df2,
              aes(x = event_timestamp, y = distance,
                  color = "Corrected", label = speed_lab),
-             nudge_y = 25, size = 2, alpha = 0.9, show.legend = FALSE,
-             family = "Verdana") +
-  geom_segment(aes(x = as.POSIXct("2024-09-10 19:36:05",
+             nudge_y = 20, size = 2, alpha = 0.9, show.legend = FALSE) +
+  geom_segment(aes(x = as.POSIXct("2024-11-19 20:20:15",
                                   tz = "America/New_York"),
-                   xend = as.POSIXct("2024-09-10 19:36:00",
+                   xend = as.POSIXct("2024-11-19 20:20:30",
                                      tz = "America/New_York"),
-                   y = 14217, yend = 14157),
-               arrow = arrow(ends = "last", type = "closed",
+                   y = 11925, yend = 11970),
+               arrow = arrow(ends = "first", type = "closed",
                              length = unit(0.025, units = "npc")),
                color = "grey30", linetype = "solid", linewidth = 0.7) +
-  geom_label(data = (stops %>% filter((distance >= 14000) & (distance <= 14320))),
-             aes(x = as.POSIXct("2024-09-10 19:36:05", tz = "America/New_York"),
-                 y = 14157, label = stop_name),
-             color = "grey30", size = 3, alpha = 0.9, hjust = "left",
-             nudge_y = 60, family = "Verdana") +
+  geom_label(data = (stops %>% filter((distance >= 11800) &
+                                        (distance <= 12005)) %>%
+                       mutate(stop_name = "Meridian & Fall Creek Station")),
+             aes(x = as.POSIXct("2024-11-19 20:20:30",
+                                tz = "America/New_York"),
+                 y = 11970, label = stop_name),
+             color = "grey30", size = 3, alpha = 0.9, hjust = 0) +
   scale_color_manual(name = "AVL Point",
                      values = c("Original" = "firebrick",
                                 "Corrected" = "#2f6ff8")) +
@@ -618,7 +695,7 @@ step7_plot <- ggplot(data = plot_df1) +
   scale_linetype_manual(name = "Features",
                         values = c("BRT Stops" = "dashed")) +
   theme_minimal() +
-  labs(x = "Time (evening of 9/10/24)",
+  labs(x = "Time (evening of 11/19/24)",
        y = "Distance from Beginning (m)",
        title = "(F) Monotonic Correction in AVL: `make_monotonic()`",
        subtitle = paste("IndyGo Red Line 90 NB; Trip ID ", plot_trip,
@@ -631,6 +708,85 @@ step7_plot
 
 
 <img src="figures/figure_3F.png" alt="" width="100%" />
+
+We'll also analyze the distribution of distance and speed adjustments. Below we measure how much each distance speed observation changed, and count the number of points with changes:
+
+
+``` r
+mono_deltas <- step7_df %>%
+  # get mono dists & speeds
+  select(location_ping_id, distance, speed) %>%
+  rename(d_f = distance,
+         v_f = speed) %>%
+  # join with old, non-mono dists & speeds
+  left_join(y = step6_df %>%
+              select(location_ping_id, distance, speed) %>%
+              rename(d_0 = distance,
+                     v_0 = speed),
+            by = "location_ping_id") %>%
+  # calculate changes
+  mutate(delta_d = d_f - d_0,
+         delta_v = v_f - v_0,
+         d_changed = delta_d != 0,
+         v_changed = delta_v != 0,
+         changed = d_changed | v_changed)
+
+# Total number of points changed
+n_d_changed = sum(mono_deltas$d_changed)
+p_d_changed = n_d_changed / dim(mono_deltas)[1]
+n_v_changed = sum(mono_deltas$v_changed)
+p_v_changed = n_v_changed / dim(mono_deltas)[1]
+n_changed = sum(mono_deltas$changed)
+p_changed = n_changed / dim(mono_deltas)[1]
+cat("Points w/ distance correction: ", n_d_changed,
+    " (", scales::percent(p_d_changed, accuracy = 0.1), ")",
+    "\nPoints w/ speed correction: ", n_v_changed,
+    " (", scales::percent(p_v_changed, accuracy = 0.1), ")",
+    "\nPoints w/ any correction: ", n_changed,
+    " (", scales::percent(p_changed, accuracy = 0.1), ")",
+    sep = "")
+```
+
+Next, we below plot the distribution of these changes *among only points that were changed*:
+
+
+``` r
+p_delta_v <- ggplot(data = mono_deltas %>% filter(v_changed)) +
+  geom_density(aes(x = delta_v),
+               fill = my_b, color = "navy", alpha = 0.8, linewidth = 0.8
+              ) +
+  scale_x_continuous(transform = transform_pseudo_log(sigma = 0.000001),
+                     breaks = c(c(-10, -1, -0.1, -0.01, -0.001, -0.0001,
+                                  0, 0.0001, 0.001, 0.01, 0.1, 1)),
+                     labels = label_comma(drop0trailing = TRUE),
+                     name = "Speed Correction (m/s)") +
+  theme_minimal() +
+  labs(y = "Density",
+       title = "(B) Speeds") +
+  theme(plot.title.position = "plot")
+
+p_delta_d <- ggplot(data = mono_deltas %>% filter(d_changed)) +
+  geom_density(aes(x = delta_d),
+               fill = my_b, color = "navy", alpha = 0.8, linewidth = 0.8
+              ) +
+  scale_x_continuous(name = "Distance Correction (m)",
+                     transform = transform_pseudo_log(sigma = 0.000001),
+                     labels = scales::label_comma(drop0trailing = TRUE),
+                     breaks = c(-1000, -100, -10, -1, -0.1, -0.01, -0.001, 0,
+                                0.001, 0.01, 0.1, 1, 10, 100, 1000)) +
+  theme_minimal() +
+  labs(y = "Density",
+       title = "(A) Distances") +
+  theme(plot.title.position = "plot")
+
+p_deltas <- p_delta_d + p_delta_v +
+  plot_layout(ncol = 1, nrow = 2)
+p_deltas
+```
+
+
+
+<img src="figures/figure_6-2.png" alt="" width="100%" />
 
 ## Fit Interpolating Curve
 
@@ -646,8 +802,19 @@ fin <- bench::mark(
   time_unit = "s", check = TRUE, iterations = bench_iter, min_time = Inf
 )
 #> Warning: Some expressions had a GC in every iteration; so filtering is disabled.
+
+# Benchmarking
 traj <- fin$result[[1]]
 dur[["Final"]] <- fin[,1:8]
+bm[["Final"]] <- data.frame(
+  min_t = fin$min,
+  med_t = fin$median,
+  mem_alloc = as.character(fin$mem_alloc),
+  ngc = fin$n_gc
+)
+bm_times[["Final"]] <- data.frame(
+  t = as.numeric(fin$time[[1]])
+)
 
 # Get info
 n_obs <- append(n_obs, NA)
@@ -661,7 +828,7 @@ Next, plot our example:
 
 
 ``` r
-plot_trip <- "2024-09-25-t47A-b232A-sl3-N"
+plot_trip <- "2024-11-18-t58C-b2336-sl3-N"
 plot_lims <- c(4440, 5000)
 
 traj_df <- predict(object = traj,
@@ -675,13 +842,17 @@ point_df <- distance_df %>%
   filter((distance >= plot_lims[1]) & (distance <= plot_lims[2])) %>%
   mutate(speed_lab = if_else(condition = (distance == min(distance)),
                              true = paste(round(speed, 1), " m/s", sep = "\n"),
-                             false = paste(round(speed, 1))))
+                             false = sprintf(speed, fmt = "%.1f")))
 
 traj_plot <- ggplot() +
-  geom_hline(data = (stops %>% filter((distance >= plot_lims[1]) & (distance <= plot_lims[2]))),
+  geom_hline(data = (stops %>%
+                       filter((distance >= plot_lims[1]) &
+                                (distance <= plot_lims[2]))),
              aes(yintercept = distance, linetype = "BRT Stops"),
-             color = "firebrick", linewidth = 0.9) +
-  geom_hline(data = (signals %>% filter((distance >= plot_lims[1]) & (distance <= plot_lims[2]))),
+             color = "grey25", linewidth = 0.9) +
+  geom_hline(data = (signals %>%
+                       filter((distance >= plot_lims[1]) &
+                                (distance <= plot_lims[2]))),
              aes(yintercept = distance, linetype = "Signals"),
              color = "grey50", linewidth = 0.9) +
   geom_line(data = traj_df,
@@ -695,18 +866,19 @@ traj_plot <- ggplot() +
              color = "#2f6ff8", fill = "#2f6ff8", size = 2, stroke = 2, alpha = 0.8) +
   geom_label(data = point_df,
              aes(x = event_timestamp, y = distance, label = speed_lab),
-             color = "#2f6ff8", size = 3.4, alpha = 0.8, nudge_y = 30, nudge_x = -5,
-             family = "Verdana") +
-  geom_label(data = (stops %>% filter((distance >= plot_lims[1]) & (distance <= plot_lims[2]))),
-             aes(x = as.POSIXct("2024-09-25 11:55:50", tz = "America/New_York"),
+             color = "#2f6ff8", size = 3.4, alpha = 0.8, nudge_y = 30, nudge_x = -5) +
+  geom_label(data = (stops %>%
+                       filter((distance >= plot_lims[1]) &
+                                (distance <= plot_lims[2]))),
+             aes(x = as.POSIXct("2024-11-18 14:30:00", tz = "America/New_York"),
                  y = distance, label = stop_name),
-             color = "firebrick", size = 3.4, hjust = "left", alpha = 0.9,
-             family = "Verdana") +
-  geom_label(data = (signals %>% filter((distance >= plot_lims[1]) & (distance <= plot_lims[2]))),
-             aes(x = as.POSIXct("2024-09-25 11:58:58", tz = "America/New_York"),
+             color = "grey20", size = 3.4, hjust = "left", alpha = 0.9) +
+  geom_label(data = (signals %>%
+                       filter((distance >= plot_lims[1]) &
+                                (distance <= plot_lims[2]))),
+             aes(x = as.POSIXct("2024-11-18 14:32:50", tz = "America/New_York"),
                  y = distance, label = name),
-             color = "grey30", size = 3.3, hjust = "right", nudge_y = -0, alpha = 0.9,
-             family = "Verdana") +
+             color = "grey30", size = 3.3, hjust = "right", alpha = 0.9) +
   scale_linetype_manual(name = "Features",
                         values = c("BRT Stops" = "longdash",
                                    "Signals" = "dotted")) +
@@ -716,10 +888,11 @@ traj_plot <- ggplot() +
                      values = c("Spline" = "#f43155",
                                 "Linear" = "#2f6ff8")) +
   theme_minimal() +
-  labs(x = "Time (morning of 9/25/24)",
+  labs(x = "Time (afternoon of 11/18/24)",
        y = "Distance from Beginning (m)",
        title = "(G) Final Trajectory: `get_trajectory_fun()`",
-       subtitle = paste("IndyGo Red Line 90 NB through Fountain Square; Trip ID: ", plot_trip,
+       subtitle = paste("IndyGo Red Line 90 NB through Fountain Square; Trip ID: ",
+                        plot_trip,
                         sep = "")) +
   theme(plot.title = element_marquee(style = code_style),
         plot.title.position = "plot")
@@ -748,7 +921,7 @@ summary(traj)
 #> AVL Group Trajectory Object
 #> ------
 #> Number of trips: 3100
-#> Total distance range: 0 to 20499.99
+#> Total distance range: -0.1125 to 20499.99
 #> Total time range: 1730433602 to 1735707538
 #> ------
 #> Trajectory function present: TRUE
@@ -808,13 +981,13 @@ knitr::kable(summ_clean)
 |Step    |Number of Observations |Number of Trips | Median Time (s)|Change in Observations |Change in Trips |
 |:-------|:----------------------|:---------------|---------------:|:----------------------|:---------------|
 |Initial |1,707,095              |3,256           |              NA|NA (NA%)               |NA (NA%)        |
-|1 & 2   |1,348,250              |3,253           |            23.6|-358,845 (-21%)        |-3 (-0.1%)      |
-|3       |1,345,613              |3,246           |             0.9|-2,637 (-0.2%)         |-7 (-0.2%)      |
-|4       |1,344,129              |3,246           |            55.6|-1,484 (-0.1%)         |0 (0%)          |
-|5       |1,335,074              |3,241           |             0.4|-9,055 (-0.7%)         |-5 (-0.2%)      |
-|6       |1,304,499              |3,100           |             1.1|-30,575 (-2.3%)        |-141 (-4.4%)    |
-|7       |1,304,499              |3,100           |            73.3|0 (0%)                 |0 (0%)          |
-|Final   |NA                     |3,100           |            36.5|NA (NA%)               |0 (0%)          |
+|1 & 2   |1,348,251              |3,253           |            20.8|-358,844 (-21%)        |-3 (-0.1%)      |
+|3       |1,345,614              |3,246           |             0.8|-2,637 (-0.2%)         |-7 (-0.2%)      |
+|4       |1,344,130              |3,246           |            53.8|-1,484 (-0.1%)         |0 (0%)          |
+|5       |1,335,074              |3,241           |             0.5|-9,056 (-0.7%)         |-5 (-0.2%)      |
+|6       |1,304,499              |3,100           |             1.3|-30,575 (-2.3%)        |-141 (-4.4%)    |
+|7       |1,304,499              |3,100           |             1.4|0 (0%)                 |0 (0%)          |
+|Final   |NA                     |3,100           |            36.4|NA (NA%)               |0 (0%)          |
 
 
 
@@ -827,7 +1000,132 @@ Finally, the total time required by the cleaning process, in seconds, is:
 total_time <- sum(cleaning_summ$median,
                   na.rm = TRUE)
 print(total_time)
-#> [1] 191.3807
+#> [1] 114.9561
+```
+
+# Full Benchmarking Results
+
+In this section, we'll summarize the full benchmarking results, included in Appendix B of the paper.
+
+## Table
+
+We'll create a table summarizing the important information included in each `bench::mark` object:
+
+
+``` r
+bm_tab <- bind_rows(bm, .id = "Step")
+bm_clean <- bm_tab %>%
+  mutate(min_t = sprintf(min_t, fmt = "%.2f"),
+         med_t = sprintf(med_t, fmt = "%.2f")) %>%
+  rename(`Minimum` = min_t,
+         `Median` = med_t,
+         `Maximum` = max_t,
+         `Memory Allocation` = mem_alloc,
+         `Number of Garbage Collections` = ngc)
+#> Error in `rename()`:
+#> ! Can't rename columns that don't exist.
+#> ✖ Column `max_t` doesn't exist.
+
+knitr::kable(bm_clean)
+#> Error:
+#> ! object 'bm_clean' not found
+```
+
+
+```
+#> Error:
+#> ! object 'bm_clean' not found
+```
+
+## Visualization
+
+Finally, below we plot the distribution of individual iterations' processing times:
+
+
+``` r
+bm_times_df <- bind_rows(bm_times, .id = "Step")
+
+bm_plot <- ggplot(data = bm_times_df) +
+  geom_beeswarm(aes(x = t, y = Step,
+                    color = "Iteration", shape = "Iteration"),
+                method = "center",
+                size = 2.3, alpha = 0.6) +
+  geom_point(data = bm_tab,
+             aes(x = med_t, y = Step,
+                 color = "Median", shape = "Median"),
+             size = 3.2, alpha = 1) +
+  scale_color_manual(name = NULL,
+                     values = c("Iteration" = my_r,
+                                "Median" = my_b)) +
+  scale_shape_manual(name = NULL,
+                     values = c("Iteration" = 20,
+                                "Median" = 15)) +
+  theme_minimal() +
+  labs(x = "Time (s)",
+       y = "Step")
+```
+
+
+
+
+```
+#> Orientation inferred to be along y-axis; override with `position_beeswarm(orientation = 'x')`
+#> Warning: In `position_beeswarm`, method `center` discretizes the data axis (a.k.a the continuous or non-grouped axis).
+#> This may result in changes to the position of the points along that axis, proportional to the value of `cex`.
+#> To prevent this behavior, set `preserve.data.axis=TRUE`.
+#> This warning is displayed once per session.
+#> Orientation inferred to be along y-axis; override with `position_beeswarm(orientation = 'x')`
+```
+
+<img src="figures/figure_B1.png" alt="" width="100%" />
+
+# Session Information
+
+
+``` r
+# Print version of R
+version
+#>                _                                
+#> platform       x86_64-w64-mingw32               
+#> arch           x86_64                           
+#> os             mingw32                          
+#> crt            ucrt                             
+#> system         x86_64, mingw32                  
+#> status                                          
+#> major          4                                
+#> minor          6.2                              
+#> year           2026                             
+#> month          10                               
+#> day            29                               
+#> svn rev        90784                            
+#> language       R                                
+#> version.string R version 4.6.2 (2026-10-29 ucrt)
+#> nickname       Diversified Portfolio
+
+# Print versions of all loaded packages
+sessionInfo()
+#> R version 4.6.2 (2026-10-29 ucrt)
+#> Platform: x86_64-w64-mingw32/x64
+#> Running under: Windows 11 x64 (build 26200)
+#> 
+#> Matrix products: default
+#>   LAPACK version 3.12.1
+#> 
+#> locale:
+#> [1] LC_COLLATE=English_United States.utf8  LC_CTYPE=English_United States.utf8    LC_MONETARY=English_United States.utf8 LC_NUMERIC=C                           LC_TIME=English_United States.utf8    
+#> 
+#> time zone: America/Chicago
+#> tzcode source: internal
+#> 
+#> attached base packages:
+#> [1] stats     graphics  grDevices utils     datasets  methods   base     
+#> 
+#> other attached packages:
+#>  [1] scales_1.4.0      ggbeeswarm_0.7.3  patchwork_1.3.2   marquee_1.2.1     lubridate_1.9.5   forcats_1.0.1     stringr_1.6.0     dplyr_1.2.1       purrr_1.2.2       readr_2.2.0       tidyr_1.3.2       tibble_3.3.1      ggplot2_4.0.3     tidyverse_2.0.0   transittraj_1.2.0
+#> 
+#> loaded via a namespace (and not attached):
+#>  [1] gtable_0.3.6       beeswarm_0.4.0     xfun_0.62          ivs_0.2.0          bench_1.1.4        tzdb_0.5.0         vctrs_0.7.3        tools_4.6.2        generics_0.1.4     proxy_0.4-29       pkgconfig_2.0.3    KernSmooth_2.23-27 RColorBrewer_1.1-3 S7_0.2.2           lifecycle_1.0.5    compiler_4.6.2     farver_2.1.2       textshaping_1.0.5  geos_0.2.5         terra_1.9-50       codetools_0.2-20   libgeos_3.11.1-3   vipor_0.4.7        htmltools_0.5.9    class_7.3-24       yaml_2.3.12        profmem_0.7.0      pillar_1.11.1      classInt_0.4-11    wk_0.9.5           tidyselect_1.2.1   digest_0.6.39      stringi_1.8.9      sf_1.1-3           labeling_0.4.3     fastmap_1.2.0      grid_4.6.2         cli_3.6.6          magrittr_2.0.5     e1071_1.7-17       withr_3.0.3        warp_0.2.3         timechange_0.4.0   rmarkdown_2.32     slider_0.3.3       otel_0.3.0         ragg_1.5.2         hms_1.1.4          evaluate_1.0.5     knitr_1.52         rlang_1.3.0        Rcpp_1.1.2        
+#> [53] glue_1.8.1         DBI_1.3.0          rstudioapi_0.19.0  R6_2.6.1           systemfonts_1.3.2  units_1.0-1
 ```
 
 
