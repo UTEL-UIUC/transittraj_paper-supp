@@ -34,8 +34,8 @@ into three `markdown` vignettes, all stored in [`/vignettes`](vignettes/):
   traffic signal performance measures presented in Section 3 (Case Study). Also
   included ais a sensitivity analysis of theshold values, shown in Appendix C.
   
-  3. [Evaluating the Robustness of Reconstructed Trajectories](vignettes/robustness.md).
-  This vignette includes all code used to the quality of AVL data and
+  3. [Evaluating Data Quality](vignettes/evaluation.md). This vignette
+  includes all code used to the quality of AVL data and
   trajectories before and after the cleaning workflow, as discussed in Section
   4 (Data Evaluation).
   
