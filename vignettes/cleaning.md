@@ -419,7 +419,6 @@ step5 <- bench::mark(
 #> Removing the following: 2024-11-22-t325-b2331-sl3-N, 2024-11-25-t803-b2335-sl3-N, 2024-12-05-t60E-b2334-sl3-N, 2024-12-12-t84D-b233C-sl3-N, 2024-12-31-t5-b233D-sl3-N
 #> Trips found with maximum at or before minimum point -- potential wrong direction.
 #> Removing the following: 2024-11-22-t325-b2331-sl3-N, 2024-11-25-t803-b2335-sl3-N, 2024-12-05-t60E-b2334-sl3-N, 2024-12-12-t84D-b233C-sl3-N, 2024-12-31-t5-b233D-sl3-N
-#> Warning: Some expressions had a GC in every iteration; so filtering is disabled.
 
 # Benchmarking
 step5_df <- step5$result[[1]]
@@ -981,13 +980,13 @@ knitr::kable(summ_clean)
 |Step    |Number of Observations |Number of Trips | Median Time (s)|Change in Observations |Change in Trips |
 |:-------|:----------------------|:---------------|---------------:|:----------------------|:---------------|
 |Initial |1,707,095              |3,256           |              NA|NA (NA%)               |NA (NA%)        |
-|1 & 2   |1,348,251              |3,253           |            20.8|-358,844 (-21%)        |-3 (-0.1%)      |
-|3       |1,345,614              |3,246           |             0.8|-2,637 (-0.2%)         |-7 (-0.2%)      |
-|4       |1,344,130              |3,246           |            53.8|-1,484 (-0.1%)         |0 (0%)          |
-|5       |1,335,074              |3,241           |             0.5|-9,056 (-0.7%)         |-5 (-0.2%)      |
-|6       |1,304,499              |3,100           |             1.3|-30,575 (-2.3%)        |-141 (-4.4%)    |
-|7       |1,304,499              |3,100           |             1.4|0 (0%)                 |0 (0%)          |
-|Final   |NA                     |3,100           |            36.4|NA (NA%)               |0 (0%)          |
+|1 & 2   |1,348,251              |3,253           |            20.9|-358,844 (-21%)        |-3 (-0.1%)      |
+|3       |1,345,614              |3,246           |             0.9|-2,637 (-0.2%)         |-7 (-0.2%)      |
+|4       |1,344,130              |3,246           |            55.1|-1,484 (-0.1%)         |0 (0%)          |
+|5       |1,335,074              |3,241           |             0.4|-9,056 (-0.7%)         |-5 (-0.2%)      |
+|6       |1,304,499              |3,100           |             1.1|-30,575 (-2.3%)        |-141 (-4.4%)    |
+|7       |1,304,499              |3,100           |             1.3|0 (0%)                 |0 (0%)          |
+|Final   |NA                     |3,100           |            37.5|NA (NA%)               |0 (0%)          |
 
 
 
@@ -1000,7 +999,7 @@ Finally, the total time required by the cleaning process, in seconds, is:
 total_time <- sum(cleaning_summ$median,
                   na.rm = TRUE)
 print(total_time)
-#> [1] 114.9561
+#> [1] 117.1101
 ```
 
 # Full Benchmarking Results
@@ -1019,23 +1018,27 @@ bm_clean <- bm_tab %>%
          med_t = sprintf(med_t, fmt = "%.2f")) %>%
   rename(`Minimum` = min_t,
          `Median` = med_t,
-         `Maximum` = max_t,
          `Memory Allocation` = mem_alloc,
          `Number of Garbage Collections` = ngc)
-#> Error in `rename()`:
-#> ! Can't rename columns that don't exist.
-#> ✖ Column `max_t` doesn't exist.
 
 knitr::kable(bm_clean)
-#> Error:
-#> ! object 'bm_clean' not found
 ```
 
 
-```
-#> Error:
-#> ! object 'bm_clean' not found
-```
+
+|Step  |Minimum |Median |Memory Allocation | Number of Garbage Collections|
+|:-----|:-------|:------|:-----------------|-----------------------------:|
+|1 & 2 |20.25   |20.86  |588MB             |                           154|
+|3     |0.81    |0.87   |480MB             |                            36|
+|4     |54.46   |55.12  |766MB             |                          4055|
+|5     |0.35    |0.35   |817MB             |                            38|
+|6     |0.99    |1.13   |694MB             |                            44|
+|7     |1.22    |1.29   |949MB             |                            55|
+|Final |35.23   |37.48  |61.7GB            |                           969|
+
+
+
+
 
 ## Visualization
 
@@ -1053,13 +1056,13 @@ bm_plot <- ggplot(data = bm_times_df) +
   geom_point(data = bm_tab,
              aes(x = med_t, y = Step,
                  color = "Median", shape = "Median"),
-             size = 3.2, alpha = 1) +
+             size = 3.2, alpha = 1, stroke = 1, fill = my_b) +
   scale_color_manual(name = NULL,
                      values = c("Iteration" = my_r,
-                                "Median" = my_b)) +
+                                "Median" = "navy")) +
   scale_shape_manual(name = NULL,
                      values = c("Iteration" = 20,
-                                "Median" = 15)) +
+                                "Median" = 22)) +
   theme_minimal() +
   labs(x = "Time (s)",
        y = "Step")

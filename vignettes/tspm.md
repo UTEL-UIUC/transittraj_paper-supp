@@ -1000,7 +1000,7 @@ print(bm_crossings)
 #> Warning in deparse(x, width.cutoff = width): invalid 'cutoff' value for 'deparse', using default
 #>   expression                                         min median `itr/sec` mem_alloc `gc/sec` n_itr  n_gc total_time result            memory                  time            gc               
 #>   <bch:expr>                                       <dbl>  <dbl>     <dbl> <bch:byt>    <dbl> <int> <dbl>      <dbl> <list>            <list>                  <list>          <list>           
-#> 1 predict(object = traj, new_distances = sig_bnds)  3.21   3.25     0.305    6.08MB     2.02    20   132       65.5 <df [17,844 × 5]> <Rprofmem [93,489 × 3]> <bench_tm [20]> <tibble [20 × 3]>
+#> 1 predict(object = traj, new_distances = sig_bnds)  3.35   3.42     0.290    6.08MB     1.90    20   131       69.0 <df [17,844 × 5]> <Rprofmem [94,571 × 3]> <bench_tm [20]> <tibble [20 × 3]>
 
 # Time for AoG/SF stepped interp (seconds)
 print(bm_interp)
@@ -1008,7 +1008,7 @@ print(bm_interp)
 #> Warning in deparse(x, width.cutoff = width): invalid 'cutoff' value for 'deparse', using default
 #>   expression                                                                                   min median `itr/sec` mem_alloc `gc/sec` n_itr  n_gc total_time result                   memory                   time            gc               
 #>   <bch:expr>                                                                                 <dbl>  <dbl>     <dbl> <bch:byt>    <dbl> <int> <dbl>      <dbl> <list>                   <list>                   <list>          <list>           
-#> 1 predict(object = traj, distance_lims = step_bounds, timestep = timestep,  deriv = c(0, 1))  71.3   72.0    0.0139     681MB     1.32    20  1900      1439. <tibble [4,626,102 × 4]> <Rprofmem [123,468 × 3]> <bench_tm [20]> <tibble [20 × 3]>
+#> 1 predict(object = traj, distance_lims = step_bounds, timestep = timestep,  deriv = c(0, 1))  72.0   72.8    0.0137     681MB     1.29    20  1882      1457. <tibble [4,626,102 × 4]> <Rprofmem [125,707 × 3]> <bench_tm [20]> <tibble [20 × 3]>
 ```
 
 # Full Benchmarking Results
@@ -1037,14 +1037,14 @@ knitr::kable(bm_clean)
 
 |Interpolation Type |Minimum |Median |Memory Allocation | Number of Garbage Collections|
 |:------------------|:-------|:------|:-----------------|-----------------------------:|
-|Inverse Crossings  |3.21    |3.25   |6.08MB            |                           132|
-|Bounded Steps      |71.33   |71.99  |681MB             |                          1900|
+|Inverse Crossings  |3.35    |3.42   |6.08MB            |                           131|
+|Bounded Steps      |71.98   |72.81  |681MB             |                          1882|
 
 
 
 
 
-## Visualiation
+## Visualization
 
 Finally, below we plot the distribution of individual iterations' processing times:
 
@@ -1060,13 +1060,13 @@ bm_plot <- ggplot(data = bm_times_df) +
   geom_point(data = bm_tab,
              aes(x = med_t, y = `Interpolation Type`,
                  color = "Median", shape = "Median"),
-             size = 3.2, alpha = 1) +
+             size = 3.2, alpha = 1, stroke = 1, fill = my_b) +
   scale_color_manual(name = NULL,
                      values = c("Iteration" = my_r,
-                                "Median" = my_b)) +
+                                "Median" = "navy")) +
   scale_shape_manual(name = NULL,
                      values = c("Iteration" = 20,
-                                "Median" = 15)) +
+                                "Median" = 22)) +
   theme_minimal() +
   labs(x = "Time (s)",
        y = "Interpolation Type")
