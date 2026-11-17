@@ -48,4 +48,4 @@ of that code, and annotations describing the code. Thorough discussions of the
 results are presented in our paper. In addition to the rendered ("knit") files, each
 vignette has a un-rendered `Rmarkdown` file in [`/vignettes`](vignettes/).
 These include all raw code chunks, including those hidden in the knit
-vignettes.
+vignettes (loading data, saving results, rendering plots, etc.).

@@ -39,6 +39,32 @@ library(marquee)
 library(basemaps)
 ```
 
+``` {r}
+# Plotting parameters
+agency_timezone <- "America/New_York"
+my_r <- "#f43155"
+my_b <- "#2f6ff8"
+my_g <- "#00A884"
+
+marquee_label <- function(border = "firebrick",
+                          align = "center") {
+  
+  lab <- classic_style(
+    margin = trbl(0),
+    padding = trbl(4),
+    border = border,
+    border_width = trbl(1),
+    border_radius = 3,
+    align = align
+  ) %>%
+    modify_style(tag = "ul",
+                 padding = trbl(0, 0, 0, em(0.5))) %>%
+    modify_style(tag = "li",
+                 padding = trbl(0, 0, 0, em(0.5)))
+  return(lab)
+}
+```
+
 We perform this robustness check on AVL data from IndyGo's northbound Red Line BRT service. We accessed IndyGo’s AVL data from their Swiftly endpoint, after which it was reformatted to meet the TIDES standards required by `transittraj` and stored in the dataframe `avl_df`. We do not have permission to share this dataset, and so have pre-loaded it into our RStudio session before running this vignette.
 
 ``` {r, eval = TRUE, echo = FALSE}
@@ -54,6 +80,14 @@ apc_df <- readRDS("C:\\Users\\obrie\\OneDrive - University of Illinois - Urbana\
 
 # Route geometry
 route_geom <- readRDS("C:\\Users\\obrie\\OneDrive - University of Illinois - Urbana\\IndyGo Project\\Analysis_new\\spatial\\routes\\route_geom_90N.rds")
+
+# Stops & signals
+stops <- readRDS("C:\\Users\\obrie\\OneDrive - University of Illinois - Urbana\\IndyGo Project\\Analysis_new\\spatial\\routes\\stop_distances.rds") %>%
+  filter(route == "90N") %>%
+  select(-route)
+signals <- readRDS("C:\\Users\\obrie\\OneDrive - University of Illinois - Urbana\\IndyGo Project\\Analysis_new\\spatial\\signals\\signals_90N.rds") %>%
+  filter(grepl("90N", routes)) %>%
+  select(name, distance, routes)
 ```
 
 ``` {r}
@@ -251,41 +285,40 @@ Finally, we run this check on our raw and clean datasets:
 
 ``` {r}
 # Get raw & cleaned evaluations
-phys_eval <- bind_rows(
+phys_eval_df <- bind_rows(
   phys_eval(distance_df) %>%
     mutate(Dataset = "Raw"),
   phys_eval(mono_df) %>%
     mutate(Dataset = "Clean")
 )
 
-# number of trips
-knitr::kable(phys_eval %>% select(Dataset, n_trips))
+# number of observations & trips
+knitr::kable(phys_eval_df %>% distinct(Dataset, n_trips, n_obs))
 
-# number of observations
-knitr::kable(phys_eval %>% select(Dataset, n_obs))
-
-phys_eval_clean <- phys_eval %>%
-  # Make table pretty
+# Make table pretty
+phys_eval_clean <- phys_eval_df %>%
   mutate(trips_vio = paste(n_trips_vio, " (", perc_trips_vio, ")",
                            sep = ""),
          obs_vio = paste(n_obs_vio, " (", perc_obs_vio, ")",
                          sep = "")) %>%
   select(Violation, Dataset, n_trips, trips_vio, n_obs, obs_vio)
-eval_phys_piv <- eval_phys %>%
+phys_eval_piv <- phys_eval_clean %>%
   pivot_wider(id_cols = "Violation", names_from = "Dataset",
               values_from = c("trips_vio", "obs_vio"),
               names_glue = "{Dataset}_{.value}")
 
 # Print table
-knitr::kable(phys_eval_clean)
+knitr::kable(phys_eval_piv)
 ```
 
 ``` {r, eval = FALSE, echo = FALSE}
-write.csv(x = phys_eval_clean,
+write.csv(x = phys_eval_piv,
           file = "C:\\Users\\obrie\\OneDrive - University of Illinois - Urbana\\IndyGo Project\\Deliverables\\Papers\\JPT_v2\\tables\\phys_eval_11-16-26.csv")
 ```
 
 # Data Source Alignment
+
+## Methods
 
 We have a dataset of automatic passenger counter (APC) data, `apc_df`, loaded into our `RStudio` environment. Each row represents a bus serving one stop, and includes information about the trip, the stop name, the arrival (`t_in`) and departure (`t_out`) times, and the dwell time:
 
@@ -306,7 +339,7 @@ sum(apc_df %>%
       pull(trip_in_traj))
 ```
 
-Unlike most APC systems, IndyGo's vendor does not record door events as entrance and exit times; rather, this system records the arrival and departure times as, roughly, the moments the bus begins its first stationary period and ends its final stationary period near each stop. Thus, we would not expect the bus to stand still during each entire "dwell," though we would expect the trajectory to stop *at some point* during each dwell. The function below matches an abritary AVL dataset (either cleaned, raw, or interpolated from a trajectory) to this APC dataset and checks whether this condition holds:
+Unlike most APC systems, IndyGo's vendor does not record door events as entrance and exit times; rather, this system records the arrival and departure times as, roughly, the moments the bus begins its first stationary period and ends its final stationary period near each stop. Thus, we would not expect the bus to stand still during each entire "dwell," though we would expect the trajectory to stop *at some point* during each dwell. The function below matches an arbritary AVL dataset (either cleaned, raw, or interpolated from a trajectory) to this APC dataset and checks whether this condition holds:
 
 ``` {r}
 # Matches AVL and APC datasets
@@ -321,7 +354,8 @@ avl_apc_match <- function(distance_df, apc_df) {
            avl_max_t = max(event_timestamp)) %>%
     ungroup() %>%
     select(trip_id_performed, event_timestamp, speed,
-           stop_name, inout, avl_min_t, avl_max_t, type)
+           stop_name, inout, avl_min_t, avl_max_t, type,
+           location_ping_id)
   
   apc_stops_df <- apc_df %>%
     filter(dwell > 0) %>%
@@ -466,11 +500,214 @@ traj_apc <- predict(object = traj,
   select(-deriv)
 ```
 
+Before display the results, we'll plot some example trips. Below we focus on two trips at Raymond Station, a far-side stop at the intersection of Sehelby & Raymond. We define a function to plot the AVL and APC data for any arbitrary trip ID:
+
+``` {r, eval = FALSE, echo = TRUE}
+# General feature info
+plot_stop <- "Raymond Station NB"
+d_expand <- c(-500, 350)
+stop_df <- stops %>%
+    filter(stop_name == plot_stop)
+plot_d <- rep(stop_df$distance, 2) + d_expand
+signals_df <- signals %>%
+  filter(distance >= plot_d[1] &
+           distance <= plot_d [2])
+
+# General function for arbitrary trip
+p_trip <- function(plot_trip) {
+  # APC data
+  stop_times <- apc_df %>%
+    filter((trip_id_performed == plot_trip) &
+             (stop_name == plot_stop)) %>%
+    select(t_in, t_out) %>%
+    mutate(t_in = as.POSIXct(t_in, tz = agency_timezone),
+           t_out = as.POSIXct(t_out, tz = agency_timezone))
+  
+  # AVL point data
+  point_df <- rbind(
+    distance_df %>%
+        filter(trip_id_performed == plot_trip) %>%
+        filter(distance >= plot_d[1] &
+                 distance <= plot_d[2]) %>%
+        select(event_timestamp, distance, location_ping_id, speed) %>%
+        mutate(Type = "Raw"),
+    mono_df %>%
+      filter(trip_id_performed == plot_trip) %>%
+      filter(distance >= plot_d[1] &
+               distance <= plot_d[2]) %>%
+      select(event_timestamp, distance, location_ping_id, speed) %>%
+      mutate(Type = "Clean")
+  ) %>%
+    mutate(consider_APC = (location_ping_id %in% raw_avl_apc$location_ping_id),
+           Type = factor(Type, levels = c("Raw", "Clean")))
+  consider_df <- point_df %>%
+    filter(consider_APC)
+  ref_df <- point_df %>%
+    filter(!consider_APC)
+  
+  # Traj data
+  trip_df <- predict(object = traj,
+                     trips = plot_trip,
+                     distance_lims = plot_d,
+                     timestep = 0.1,
+                     deriv = c(0, 1)) %>%
+    pivot_wider(id_cols = c("trip_id_performed", "event_timestamp"),
+                names_from = "deriv", values_from = "interp") %>%
+    rename(distance = `0`,
+           speed = `1`) %>%
+    mutate(event_timestamp = as.POSIXct(event_timestamp, tz = agency_timezone))
+  
+  # Label
+  lab_df <- stop_times %>%
+    mutate(x = (as.numeric(t_in) + as.numeric(t_out)) / 2,
+           x = as.POSIXct(x, tz = agency_timezone),
+           y = 2750,
+           t = as.numeric(t_out) - as.numeric(t_in)) %>%
+    mutate(min_raw = consider_df %>%
+             filter(Type == "Raw") %>%
+             pull(speed) %>%
+             min() * 2.237,
+           min_clean = consider_df %>%
+             filter(Type == "Raw") %>%
+             pull(speed) %>%
+             min() * 2.237,
+           min_traj = trip_df %>%
+             filter(event_timestamp >= t_in &
+                      event_timestamp <= t_out) %>%
+             pull(speed) %>%
+             min() * 2.237,
+           min_raw = sprintf(min_raw, fmt = "%.1f"),
+           min_clean = sprintf(min_clean, fmt = "%.1f"),
+           min_traj = sprintf(min_traj, fmt = "%.1f"),
+           lab = paste("**APC Dwell**: ", t, " s",
+                       "  \n**AVL Min Speeds**:",
+                       "  \n  - *Raw*: ", min_raw, " mph",
+                       "  \n  - *Clean*: ", min_clean, " mph",
+                       "  \n  - *Traj*: ", min_traj, " mph",
+                       sep = ""))
+  
+  # Create plot
+  p <- ggplot() +
+    geom_rect(data = stop_times,
+              aes(xmin = t_in, xmax = t_out, ymin = -Inf, ymax = Inf),
+              fill = my_r, alpha = 0.2, color = NULL) +
+    geom_hline(data = signals_df,
+               aes(yintercept = distance, linetype = "Signal"),
+               color = "grey40", linewidth = 0.8) +
+    geom_hline(data = stop_df,
+               aes(yintercept = distance, linetype = "BRT Stop"),
+               color = "grey20", linewidth = 1) +
+    scale_linetype_manual(name = "Features",
+                          values = c("Signal" = "dotted",
+                                     "BRT Stop" = "longdash"),
+                          guide = FALSE) +
+    geom_line(data = trip_df,
+              aes(x = event_timestamp, y = distance, color = speed),
+              linetype = "solid", linewidth = 2) +
+    scale_color_viridis_c(name = "Speed\n(m/s)",
+                          limits = c(0, 16)) +
+    ggnewscale::new_scale_color() +
+    geom_point(data = consider_df,
+               aes(x = event_timestamp, y = distance,
+                   color = Type, size = Type, shape = Type, fill = Type),
+               stroke = 0.6) +
+    scale_fill_manual(name = "Checked w/\nAPC",
+                      values = c("Raw" = my_r,
+                                 "Clean" = my_b),
+                      guide = guide_legend(order = 1)) +
+    scale_color_manual(name = "Checked w/\nAPC",
+                       values = c("Raw" = "darkred",
+                                  "Clean" = "navy"),
+                      guide = guide_legend(order = 1)) +
+    scale_shape_manual(name = "Checked w/\nAPC",
+                       values = c("Raw" = 21,
+                                  "Clean" = 22),
+                      guide = guide_legend(order = 1)) +
+    scale_size_manual(name = "Checked w/\nAPC",
+                      values = c("Raw" = 4,
+                                 "Clean" = 2.5),
+                      guide = guide_legend(order = 1)) +
+    ggnewscale::new_scale("shape") +
+    ggnewscale::new_scale("size") +
+    geom_point(data = ref_df,
+               aes(x = event_timestamp, y = distance,
+                   size = Type, shape = Type),
+               stroke = 0.4, color = "grey15", fill = "grey50",
+               alpha = 0.7) +
+    scale_shape_manual(name = "Not Checked",
+                       values = c("Raw" = 21,
+                                  "Clean" = 22),
+                      guide = guide_legend(order = 2)) +
+    scale_size_manual(name = "Not Checked",
+                      values = c("Raw" = 3.2,
+                                 "Clean" = 1.7),
+                      guide = guide_legend(order = 2)) +
+    geom_marquee(data = lab_df,
+                 aes(x = x, y = y, label = lab),
+                 hjust = 0.5, size = 3, color = "firebrick", fill = "#FFFFFFE6",
+                 style = marquee_label(align = "left")) +
+    theme_minimal() +
+    labs(x = "Time",
+         y = "Distance (m)") +
+    theme(plot.title.position = "plot")
+
+  return(p)
+}
+
+```
+
+Below we plot one trip in which the two data sources align, and one trip in which they do not:
+
+``` {r, eval = FALSE, echo = TRUE}
+# (A) OK Trip
+p_ok <- p_trip("2024-11-27-t59B-b2337-sl3-N") +
+  geom_label(data = stop_df,
+             aes(x = as.POSIXct("2024-11-27 14:40:30", tz = agency_timezone),
+                 y = distance, label = "Raymond Station"),
+             color = "grey15", fill = "white", alpha = 0.9,
+             size = 3, hjust = 0) +
+  labs(title = "(A) Agreement Between AVL and APC",
+       subtitle = "Trip ID 2024-11-27-t59B-b2337-sl3-N")
+
+# (B) Miss Trip
+p_miss <- p_trip("2024-11-01-t25D-b2329-sl3-N") +
+  geom_label(data = signals_df,
+             aes(x = as.POSIXct("2024-11-01 06:11:15", tz = agency_timezone),
+                 y = distance, label = "Shelby & Raymond\nStopbar"),
+             color = "grey30", fill = "white", alpha = 0.9,
+             size = 3, hjust = 1) +
+  labs(title = "(B) Disagreement Between AVL and APC",
+       subtitle = "Trip ID 2024-11-01-t25D-b2329-sl3-N")
+
+# Combine
+p_apc <- p_ok + p_miss +
+  plot_layout(ncol = 2, nrow = 1, axis_titles = "collect",
+              axes = "collect", guides = "collect")
+p_apc
+```
+
+``` {r, eval = FALSE, echo = FALSE}
+ggsave(plot = p_apc,
+       height = 70, width = 190, units = "mm", scale = 1.5,
+       filename = "C:\\Users\\obrie\\OneDrive - University of Illinois - Urbana\\IndyGo Project\\Deliverables\\Papers\\JPT_v2\\images\\figure_9-2.pdf", device = cairo_pdf)
+
+ggsave(plot = p_apc,
+       height = 70, width = 190, units = "mm", scale = 1.5, dpi = 500,
+       filename = "figures/figure_9-2.png",
+       device = ragg::agg_png)
+```
+
+``` {r, out.width = "100%", eval = TRUE, echo = FALSE, fig.cap = ""}
+knitr::include_graphics("figures/figure_9-2.png")
+```
+
+## Results
+
 With this, we run the above function to evaluate the data quality across the raw AVL, the fully-cleaned monotonic AVL, and the fit trajectory:
 
 ``` {r}
 # Get raw & cleaned evaluations
-data_eval <- bind_rows(
+data_eval_df <- bind_rows(
   avl_apc_eval(avl_apc = raw_avl_apc) %>%
     mutate(Dataset = "Raw"),
   avl_apc_eval(avl_apc = mono_avl_apc) %>%
@@ -479,14 +716,11 @@ data_eval <- bind_rows(
     mutate(Dataset = "Trajectory")
 ) 
 
-# number of trips
-knitr::kable(data_eval %>% select(Dataset, n_trips))
-
-# number of observations
-knitr::kable(data_eval %>% select(Dataset, n_obs))
+# number of observations & trips
+knitr::kable(data_eval_df %>% distinct(Dataset, n_trips, n_obs))
 
 # Make final table pretty
-data_eval_clean <- data_eval %>%
+data_eval_clean <- data_eval_df %>%
   mutate(Dataset = factor(Dataset,
                           levels = c("Raw", "Clean", "Trajectory")),
          trips_vio = paste(n_trips_vio, " (", perc_trips_vio, ")",
@@ -819,8 +1053,6 @@ summ_clean <- summ %>%
          `Simulated Frequency (sec)` = freq,
          `Method` = method,
          `Number of Trips` = trips)
-
-knitr::kable(summ_clean)
 ```
 
 ``` {r, eval = FALSE, echo = FALSE}
@@ -831,10 +1063,6 @@ write.csv(x = summ_clean,
 Next, we'll generate a plot the distance and speed RMSEs against polling frequencies to visualize how they scale. We'll show and discuss the plot in the Results section.
 
 ``` {r, echo = TRUE, eval = FALSE}
-my_r <- "#f43155"
-my_b <- "#2f6ff8"
-my_g <- "#00A884"
-
 ref <- data.frame(freq = c(10, 45, 60)) %>%
   mutate(RMSE_dist_1D = 1 * freq,
          RMSE_speed = 0.1 * freq)
@@ -987,6 +1215,7 @@ pooled_summ <- res %>%
          RMSE_speed = sqrt(MSE_speed))
 
 pooled_summ_summ <- pooled_summ %>%
+  filter(freq < 35) %>%
   group_by(freq) %>%
   summarize(num_1D_lt3 = sum(RMSE_dist_1D < 3),
             num_1D_lt5 = sum(RMSE_dist_1D < 5),
@@ -1287,6 +1516,6 @@ sessionInfo()
 
 ``` {r, eval = FALSE, echo = FALSE}
 # - Knit -
-knitr::knit(input = "vignettes/raw-robustness.Rmd",
-            output = "vignettes/robustness.md")
+knitr::knit(input = "vignettes/raw-evaluation.Rmd",
+            output = "vignettes/evaluation.md")
 ```

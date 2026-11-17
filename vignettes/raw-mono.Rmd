@@ -27,11 +27,14 @@ Let's begin by loading the libraries we'll be using:
 # Data
 library(transittraj)
 library(tidyverse)
+library(sf)
 
 # Plotting
 library(patchwork)
 library(marquee)
 library(scales)
+
+# Plotting parameters
 my_r <- "#f43155"
 my_b <- "#2f6ff8"
 my_g <- "#00A884"
@@ -581,7 +584,7 @@ eval_phys <- bind_rows(
 # get trip & obs count
 n_trips <- unique(eval_phys$n_trips)
 n_obs <- unique(eval_phys$n_obs)
-cat(n_trips, " trips and ", n_obs, " AVL observations",
+cat(n_trips, " trips and ", n_obs, " APC observations",
     sep = "")
 
 # Make table pretty
@@ -1114,17 +1117,3 @@ sessionInfo()
 knitr::knit(input = "vignettes/raw-mono.Rmd",
             output = "vignettes/mono.md")
 ```
-
-
-
-
-
-
-
-
-
-
-
-
-
-asd
