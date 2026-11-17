@@ -1017,11 +1017,11 @@ write.csv(x = bm_clean,
           file = "C:\\Users\\obrie\\OneDrive - University of Illinois - Urbana\\IndyGo Project\\Deliverables\\Papers\\JPT_v2\\tables\\bm_interp_full_11-16-26.csv")
 ```
 
-## Visualiation
+## Visualization
 
 Finally, below we plot the distribution of individual iterations' processing times:
 
-``` {r}
+``` {r, warning = FALSE}
 bm_times_df <- bind_rows(bm_times, .id = "Interpolation Type")
 
 bm_plot <- ggplot(data = bm_times_df) +
@@ -1032,13 +1032,13 @@ bm_plot <- ggplot(data = bm_times_df) +
   geom_point(data = bm_tab,
              aes(x = med_t, y = `Interpolation Type`,
                  color = "Median", shape = "Median"),
-             size = 3.2, alpha = 1) +
+             size = 3.2, alpha = 1, stroke = 1, fill = my_b) +
   scale_color_manual(name = NULL,
                      values = c("Iteration" = my_r,
-                                "Median" = my_b)) +
+                                "Median" = "navy")) +
   scale_shape_manual(name = NULL,
                      values = c("Iteration" = 20,
-                                "Median" = 15)) +
+                                "Median" = 22)) +
   theme_minimal() +
   labs(x = "Time (s)",
        y = "Interpolation Type")

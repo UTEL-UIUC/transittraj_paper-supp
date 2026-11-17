@@ -31,12 +31,17 @@ into three `markdown` vignettes, all stored in [`/vignettes`](vignettes/):
   
   2. [Estimating Signal Performance Measures Using Reconstructed Trajectories](vignettes/tspm.md).
   This vignette includes all code used to estimate and visualize the
-  traffic signal performance measures presented in Section 3 (Case Study).
+  traffic signal performance measures presented in Section 3 (Case Study). Also
+  included ais a sensitivity analysis of theshold values, shown in Appendix C.
   
   3. [Evaluating the Robustness of Reconstructed Trajectories](vignettes/robustness.md).
-  This vignette includes all code used to quantify and visualize the error in
-  reconstructed trajectories across various polling frequencies and interpolating
-  methodologies, as discussed in Section 4 (Robustness Check).
+  This vignette includes all code used to the quality of AVL data and
+  trajectories before and after the cleaning workflow, as discussed in Section
+  4 (Data Evaluation).
+  
+  4. [Comparison of Monotonic Enforcement Methods](vignettes/mono.md). This
+  vignette includes all code used to compare the data quality of forward-
+  stepping and the proposed bidirectional approaches, presented in Appendix A.
   
 Each `markdown` file contains the code used, the output (figures, tables, and text)
 of that code, and annotations describing the code. Thorough discussions of the

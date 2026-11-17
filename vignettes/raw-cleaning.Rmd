@@ -1093,7 +1093,6 @@ bm_clean <- bm_tab %>%
          med_t = sprintf(med_t, fmt = "%.2f")) %>%
   rename(`Minimum` = min_t,
          `Median` = med_t,
-         `Maximum` = max_t,
          `Memory Allocation` = mem_alloc,
          `Number of Garbage Collections` = ngc)
 
@@ -1109,7 +1108,7 @@ write.csv(x = bm_clean,
 
 Finally, below we plot the distribution of individual iterations' processing times:
 
-``` {r}
+``` {r, warning = FALSE}
 bm_times_df <- bind_rows(bm_times, .id = "Step")
 
 bm_plot <- ggplot(data = bm_times_df) +
@@ -1120,13 +1119,13 @@ bm_plot <- ggplot(data = bm_times_df) +
   geom_point(data = bm_tab,
              aes(x = med_t, y = Step,
                  color = "Median", shape = "Median"),
-             size = 3.2, alpha = 1) +
+             size = 3.2, alpha = 1, stroke = 1, fill = my_b) +
   scale_color_manual(name = NULL,
                      values = c("Iteration" = my_r,
-                                "Median" = my_b)) +
+                                "Median" = "navy")) +
   scale_shape_manual(name = NULL,
                      values = c("Iteration" = 20,
-                                "Median" = 15)) +
+                                "Median" = 22)) +
   theme_minimal() +
   labs(x = "Time (s)",
        y = "Step")
@@ -1140,11 +1139,11 @@ saveRDS(bm_times_df,
 ``` {r, echo = FALSE, eval = TRUE}
 ggsave(plot = bm_plot,
        height = 80, width = 190, units = "mm",
-       scale = 1.5, fallback_resolution = 1000,
+       scale = 1.4, fallback_resolution = 1000,
        filename = "C:\\Users\\obrie\\OneDrive - University of Illinois - Urbana\\IndyGo Project\\Deliverables\\Papers\\JPT_v2\\images\\figure_B1.pdf", device = cairo_pdf)
 ggsave(plot = bm_plot,
        height = 80, width = 190, units = "mm",
-       scale = 1.5, dpi = 500,
+       scale = 1.4, dpi = 500,
        filename = "figures/figure_B1.png", device = ragg::agg_png)
 ```
 
