@@ -341,13 +341,20 @@ We have a dataset of automatic passenger counter (APC) data, `apc_df`, loaded in
 
 ``` r
 head(apc_df)
-#>   service_date           trip_id_performed                           stop_name                t_in               t_out dwell trip_in_traj
-#> 1   2024-11-01 2024-11-01-t1FB-b232E-sl3-N                               CTC-G 2024-11-01 05:20:12 2024-11-01 05:20:12     0         TRUE
-#> 2   2024-11-01 2024-11-01-t1FB-b232E-sl3-N               Statehouse Station NB 2024-11-01 05:21:36 2024-11-01 05:21:36     0         TRUE
-#> 3   2024-11-01 2024-11-01-t1FB-b232E-sl3-N Capitol Ave & Vermont St Station NB 2024-11-01 05:22:42 2024-11-01 05:22:53    11         TRUE
-#> 4   2024-11-01 2024-11-01-t1FB-b232E-sl3-N     Capitol Ave & 9th St Station NB 2024-11-01 05:24:56 2024-11-01 05:24:56     0         TRUE
-#> 5   2024-11-01 2024-11-01-t1FB-b232E-sl3-N    Capitol Ave & 14th St Station NB 2024-11-01 05:26:01 2024-11-01 05:26:01     0         TRUE
-#> 6   2024-11-01 2024-11-01-t1FB-b232E-sl3-N                IU Health Station NB 2024-11-01 05:26:47 2024-11-01 05:26:47     0         TRUE
+#>   service_date           trip_id_performed                           stop_name                t_in               t_out
+#> 1   2024-11-01 2024-11-01-t1FB-b232E-sl3-N                               CTC-G 2024-11-01 05:20:12 2024-11-01 05:20:12
+#> 2   2024-11-01 2024-11-01-t1FB-b232E-sl3-N               Statehouse Station NB 2024-11-01 05:21:36 2024-11-01 05:21:36
+#> 3   2024-11-01 2024-11-01-t1FB-b232E-sl3-N Capitol Ave & Vermont St Station NB 2024-11-01 05:22:42 2024-11-01 05:22:53
+#> 4   2024-11-01 2024-11-01-t1FB-b232E-sl3-N     Capitol Ave & 9th St Station NB 2024-11-01 05:24:56 2024-11-01 05:24:56
+#> 5   2024-11-01 2024-11-01-t1FB-b232E-sl3-N    Capitol Ave & 14th St Station NB 2024-11-01 05:26:01 2024-11-01 05:26:01
+#> 6   2024-11-01 2024-11-01-t1FB-b232E-sl3-N                IU Health Station NB 2024-11-01 05:26:47 2024-11-01 05:26:47
+#>   dwell trip_in_traj
+#> 1     0         TRUE
+#> 2     0         TRUE
+#> 3    11         TRUE
+#> 4     0         TRUE
+#> 5     0         TRUE
+#> 6     0         TRUE
 ```
 
 
@@ -1239,12 +1246,14 @@ pooled_summ <- res %>%
 pooled_summ_summ <- pooled_summ %>%
   filter(freq < 35) %>%
   group_by(freq) %>%
-  summarize(num_1D_lt3 = sum(RMSE_dist_1D < 3),
-            num_1D_lt5 = sum(RMSE_dist_1D < 5),
-            num_speed_lt1 = sum(RMSE_speed < 1)) %>%
-  mutate(per_1D_lt3 = num_1D_lt3 / (length(pools$pool_id) - 2),
-         per_1D_lt5 = num_1D_lt5 / (length(pools$pool_id) - 2),
-         per_speed_lt1 = num_speed_lt1 / (length(pools$pool_id) - 2))
+  summarize(min_RMSE = min(RMSE_dist_1D),
+            max_RMSE = max(RMSE_dist_1D),
+            n_1D_lt3 = sum(RMSE_dist_1D < 3),
+            n_1D_lt5 = sum(RMSE_dist_1D < 5),
+            n_speed_lt1 = sum(RMSE_speed < 1)) %>%
+  mutate(p_1D_lt3 = n_1D_lt3 / (length(pools$pool_id) - 2),
+         p_1D_lt5 = n_1D_lt5 / (length(pools$pool_id) - 2),
+         p_speed_lt1 = n_speed_lt1 / (length(pools$pool_id) - 2))
 ```
 
 Finally, we'll once again generate a plot of these spatial pools. We'll focus our plot on VCHIP-ME at 15-second frequencies.
@@ -1519,7 +1528,7 @@ combo_map
 
 <img src="figures/figure_11.png" alt="" width="70%" />
 
-Recognizing that the errors in reconstructed trajectories are concentrated along a few segments, we below show the portion of segments with low RMSEs. Nearly two-thirds of segments -- 64% -- have a 1D distance RMSE below 5 meters, and over two-thirds -- 69% -- have a speed RMSE below 1 m/s. This indicates that, in areas without urban canyons or covered roadways, the error between reconstructed trajectories and raw GPS points will be much smaller than the averages estimated above.
+Recognizing that the errors in reconstructed trajectories are concentrated along a few segments, we below show the portion of segments with low RMSEs. At 15 second polling, over two-third of segments -- 69% -- have a 1D distance RMSE below 5 meters, and over two-thirds -- 69% -- have a speed RMSE below 1 m/s. This indicates that, in areas without urban canyons or covered roadways, the error between reconstructed trajectories and raw GPS points will be much smaller than the averages estimated above.
 
 
 ``` r
@@ -1528,13 +1537,13 @@ knitr::kable(pooled_summ_summ)
 
 
 
-| freq| num_1D_lt3| num_1D_lt5| num_speed_lt1| per_1D_lt3| per_1D_lt5| per_speed_lt1|
-|----:|----------:|----------:|-------------:|----------:|----------:|-------------:|
-|   10|         26|         35|            30|  0.6666667|  0.8974359|     0.7692308|
-|   15|          1|         27|            27|  0.0256410|  0.6923077|     0.6923077|
-|   20|          0|          0|             3|  0.0000000|  0.0000000|     0.0769231|
-|   25|          0|          0|             1|  0.0000000|  0.0000000|     0.0256410|
-|   30|          0|          0|             0|  0.0000000|  0.0000000|     0.0000000|
+| freq|  min_RMSE| max_RMSE| n_1D_lt3| n_1D_lt5| n_speed_lt1|  p_1D_lt3|  p_1D_lt5| p_speed_lt1|
+|----:|---------:|--------:|--------:|--------:|-----------:|---------:|---------:|-----------:|
+|   10|  1.676594| 21.31735|       26|       35|          30| 0.6666667| 0.8974359|   0.7692308|
+|   15|  2.993436| 25.14777|        1|       27|          27| 0.0256410| 0.6923077|   0.6923077|
+|   20|  5.011606| 28.95090|        0|        0|           3| 0.0000000| 0.0000000|   0.0769231|
+|   25|  7.319591| 32.29223|        0|        0|           1| 0.0000000| 0.0000000|   0.0256410|
+|   30| 10.234211| 35.37197|        0|        0|           0| 0.0000000| 0.0000000|   0.0000000|
 
 
 
@@ -1571,7 +1580,8 @@ sessionInfo()
 #>   LAPACK version 3.12.1
 #> 
 #> locale:
-#> [1] LC_COLLATE=English_United States.utf8  LC_CTYPE=English_United States.utf8    LC_MONETARY=English_United States.utf8 LC_NUMERIC=C                           LC_TIME=English_United States.utf8    
+#> [1] LC_COLLATE=English_United States.utf8  LC_CTYPE=English_United States.utf8    LC_MONETARY=English_United States.utf8
+#> [4] LC_NUMERIC=C                           LC_TIME=English_United States.utf8    
 #> 
 #> time zone: America/Chicago
 #> tzcode source: internal
@@ -1580,11 +1590,21 @@ sessionInfo()
 #> [1] stats     graphics  grDevices utils     datasets  methods   base     
 #> 
 #> other attached packages:
-#>  [1] basemaps_0.1.1    marquee_1.2.1     patchwork_1.3.2   ggspatial_1.1.11  stplanr_1.2.3     sf_1.1-3          lubridate_1.9.5   forcats_1.0.1     stringr_1.6.0     dplyr_1.2.1       purrr_1.2.2       readr_2.2.0       tidyr_1.3.2       tibble_3.3.1      ggplot2_4.0.3     tidyverse_2.0.0   transittraj_1.2.0
+#>  [1] basemaps_0.1.1    marquee_1.2.1     patchwork_1.3.2   ggspatial_1.1.11  stplanr_1.2.3     sf_1.1-3         
+#>  [7] lubridate_1.9.5   forcats_1.0.1     stringr_1.6.0     dplyr_1.2.1       purrr_1.2.2       readr_2.2.0      
+#> [13] tidyr_1.3.2       tibble_3.3.1      ggplot2_4.0.3     tidyverse_2.0.0   transittraj_1.2.0
 #> 
 #> loaded via a namespace (and not attached):
-#>  [1] gtable_0.3.6       xfun_0.62          ivs_0.2.0          bench_1.1.4        tzdb_0.5.0         vctrs_0.7.3        tools_4.6.2        generics_0.1.4     curl_8.1.0         parallel_4.6.2     proxy_0.4-29       pkgconfig_2.0.3    KernSmooth_2.23-27 RColorBrewer_1.1-3 S7_0.2.2           lifecycle_1.0.5    compiler_4.6.2     farver_2.1.2       geos_0.2.5         terra_1.9-50       libgeos_3.11.1-3   codetools_0.2-20   htmltools_0.5.9    class_7.3-24       yaml_2.3.12        pillar_1.11.1      classInt_0.4-11    slippymath_0.3.1   wk_0.9.5           magick_2.9.1       tidyselect_1.2.1   digest_0.6.39      stringi_1.8.9      fastmap_1.2.0      grid_4.6.2         cli_3.6.6          magrittr_2.0.5     utf8_1.2.6         e1071_1.7-17       withr_3.0.3        scales_1.4.0       warp_0.2.3         timechange_0.4.0   slider_0.3.3       rmarkdown_2.32     httr_1.4.9         otel_0.3.0         hms_1.1.4          pbapply_1.7-5      evaluate_1.0.5     knitr_1.52         rlang_1.3.0       
-#> [53] Rcpp_1.1.2         glue_1.8.1         DBI_1.3.0          rstudioapi_0.19.0  R6_2.6.1           units_1.0-1
+#>  [1] gtable_0.3.6       xfun_0.62          ivs_0.2.0          bench_1.1.4        tzdb_0.5.0         vctrs_0.7.3       
+#>  [7] tools_4.6.2        generics_0.1.4     curl_8.1.0         parallel_4.6.2     proxy_0.4-29       pkgconfig_2.0.3   
+#> [13] KernSmooth_2.23-27 RColorBrewer_1.1-3 S7_0.2.2           lifecycle_1.0.5    compiler_4.6.2     farver_2.1.2      
+#> [19] geos_0.2.5         terra_1.9-50       libgeos_3.11.1-3   codetools_0.2-20   htmltools_0.5.9    class_7.3-24      
+#> [25] yaml_2.3.12        pillar_1.11.1      classInt_0.4-11    slippymath_0.3.1   wk_0.9.5           magick_2.9.1      
+#> [31] tidyselect_1.2.1   digest_0.6.39      stringi_1.8.9      fastmap_1.2.0      grid_4.6.2         cli_3.6.6         
+#> [37] magrittr_2.0.5     utf8_1.2.6         e1071_1.7-17       withr_3.0.3        scales_1.4.0       warp_0.2.3        
+#> [43] timechange_0.4.0   slider_0.3.3       rmarkdown_2.32     httr_1.4.9         otel_0.3.0         hms_1.1.4         
+#> [49] pbapply_1.7-5      evaluate_1.0.5     knitr_1.52         rlang_1.3.0        Rcpp_1.1.2         glue_1.8.1        
+#> [55] DBI_1.3.0          rstudioapi_0.19.0  R6_2.6.1           units_1.0-1
 ```
 
 

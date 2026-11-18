@@ -1221,12 +1221,14 @@ pooled_summ <- res %>%
 pooled_summ_summ <- pooled_summ %>%
   filter(freq < 35) %>%
   group_by(freq) %>%
-  summarize(num_1D_lt3 = sum(RMSE_dist_1D < 3),
-            num_1D_lt5 = sum(RMSE_dist_1D < 5),
-            num_speed_lt1 = sum(RMSE_speed < 1)) %>%
-  mutate(per_1D_lt3 = num_1D_lt3 / (length(pools$pool_id) - 2),
-         per_1D_lt5 = num_1D_lt5 / (length(pools$pool_id) - 2),
-         per_speed_lt1 = num_speed_lt1 / (length(pools$pool_id) - 2))
+  summarize(min_RMSE = min(RMSE_dist_1D),
+            max_RMSE = max(RMSE_dist_1D),
+            n_1D_lt3 = sum(RMSE_dist_1D < 3),
+            n_1D_lt5 = sum(RMSE_dist_1D < 5),
+            n_speed_lt1 = sum(RMSE_speed < 1)) %>%
+  mutate(p_1D_lt3 = n_1D_lt3 / (length(pools$pool_id) - 2),
+         p_1D_lt5 = n_1D_lt5 / (length(pools$pool_id) - 2),
+         p_speed_lt1 = n_speed_lt1 / (length(pools$pool_id) - 2))
 ```
 
 Finally, we'll once again generate a plot of these spatial pools. We'll focus our plot on VCHIP-ME at 15-second frequencies.
@@ -1502,7 +1504,7 @@ combo_map
 knitr::include_graphics("figures/figure_11.png")
 ```
 
-Recognizing that the errors in reconstructed trajectories are concentrated along a few segments, we below show the portion of segments with low RMSEs. Nearly two-thirds of segments -- 64% -- have a 1D distance RMSE below 5 meters, and over two-thirds -- 69% -- have a speed RMSE below 1 m/s. This indicates that, in areas without urban canyons or covered roadways, the error between reconstructed trajectories and raw GPS points will be much smaller than the averages estimated above.
+Recognizing that the errors in reconstructed trajectories are concentrated along a few segments, we below show the portion of segments with low RMSEs. At 15 second polling, over two-third of segments -- 69% -- have a 1D distance RMSE below 5 meters, and over two-thirds -- 69% -- have a speed RMSE below 1 m/s. This indicates that, in areas without urban canyons or covered roadways, the error between reconstructed trajectories and raw GPS points will be much smaller than the averages estimated above.
 
 ``` {r}
 knitr::kable(pooled_summ_summ)
