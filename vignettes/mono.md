@@ -19,11 +19,14 @@ Let's begin by loading the libraries we'll be using:
 # Data
 library(transittraj)
 library(tidyverse)
+library(sf)
 
 # Plotting
 library(patchwork)
 library(marquee)
 library(scales)
+
+# Plotting parameters
 my_r <- "#f43155"
 my_b <- "#2f6ff8"
 my_g <- "#00A884"
@@ -57,14 +60,15 @@ The second piece of data required is the northbound Red Line's alignment. This w
 
 ``` r
 print(route_geom)
+#> Simple feature collection with 1 feature and 1 field
+#> Geometry type: MULTILINESTRING
+#> Dimension:     XY
+#> Bounding box:  xmin: 571795.1 ymin: 4395912 xmax: 573767.5 ymax: 4414347
+#> Projected CRS: WGS 84 / UTM zone 16N
 #> # A tibble: 1 × 2
-#> Error in `[<-`:
-#> ! Assigned data `map(.subset(x, unname), vectbl_set_names, NULL)` must be a vector.
-#> Caused by error in `vec_size()`:
-#> ! `x` must be a vector, not a <sfc_MULTILINESTRING> object.
-#> ✖ Detected incompatible scalar S3 list. To be treated as a vector, the object must explicitly inherit from <list> or should implement a `vec_proxy()` method. Class: <sfc_MULTILINESTRING/sfc>.
-#> ℹ If this object comes from a package, please report this error to the package author.
-#> ℹ Read our FAQ about creating vector types (`?vctrs::howto_faq_fix_scalar_type_error`) to learn more.
+#>   shape_id                                                                              geometry
+#>   <chr>                                                                    <MULTILINESTRING [m]>
+#> 1 12057_shp ((573767.5 4395912, 573767 4395940, 573766.6 4395966, 573764.6 4396102, 573764.1 ...
 ```
 
 Also accessed through the GTFS were the stop locations, snapped to the route shape using `get_stop_distances()`:
@@ -575,9 +579,9 @@ eval_phys <- bind_rows(
 # get trip & obs count
 n_trips <- unique(eval_phys$n_trips)
 n_obs <- unique(eval_phys$n_obs)
-cat(n_trips, " trips and ", n_obs, " AVL observations",
+cat(n_trips, " trips and ", n_obs, " APC observations",
     sep = "")
-#> 3,100 trips and 1,304,499 AVL observations
+#> 3,100 trips and 1,304,499 APC observations
 
 # Make table pretty
 eval_phys_piv <- eval_phys %>%
@@ -1172,24 +1176,10 @@ sessionInfo()
 #> [1] stats     graphics  grDevices utils     datasets  methods   base     
 #> 
 #> other attached packages:
-#>  [1] scales_1.4.0      marquee_1.2.1     patchwork_1.3.2   lubridate_1.9.5   forcats_1.0.1     stringr_1.6.0     dplyr_1.2.1       purrr_1.2.2       readr_2.2.0       tidyr_1.3.2       tibble_3.3.1      ggplot2_4.0.3     tidyverse_2.0.0   transittraj_1.2.0
+#>  [1] scales_1.4.0      marquee_1.2.1     patchwork_1.3.2   sf_1.1-3          lubridate_1.9.5   forcats_1.0.1     stringr_1.6.0     dplyr_1.2.1       purrr_1.2.2       readr_2.2.0       tidyr_1.3.2       tibble_3.3.1      ggplot2_4.0.3     tidyverse_2.0.0   transittraj_1.2.0
 #> 
 #> loaded via a namespace (and not attached):
-#>  [1] utf8_1.2.6         generics_0.1.4     class_7.3-24       geos_0.2.5         KernSmooth_2.23-27 stringi_1.8.9      hms_1.1.4          digest_0.6.39      magrittr_2.0.5     evaluate_1.0.5     grid_4.6.2         timechange_0.4.0   RColorBrewer_1.1-3 fastmap_1.2.0      slider_0.3.3       e1071_1.7-17       DBI_1.3.0          bench_1.1.4        libgeos_3.11.1-3   codetools_0.2-20   cli_3.6.6          rlang_1.3.0        units_1.0-1        ivs_0.2.0          withr_3.0.3        yaml_2.3.12        otel_0.3.0         tools_4.6.2        tzdb_0.5.0         vctrs_0.7.3        R6_2.6.1           proxy_0.4-29       lifecycle_1.0.5    classInt_0.4-11    warp_0.2.3         pkgconfig_2.0.3    terra_1.9-50       pillar_1.11.1      gtable_0.3.6       Rcpp_1.1.2         glue_1.8.1         sf_1.1-3           xfun_0.62          tidyselect_1.2.1   rstudioapi_0.19.0  knitr_1.52         farver_2.1.2       htmltools_0.5.9    rmarkdown_2.32     wk_0.9.5           compiler_4.6.2     S7_0.2.2
+#>  [1] utf8_1.2.6         generics_0.1.4     class_7.3-24       geos_0.2.5         KernSmooth_2.23-27 stringi_1.8.9      hms_1.1.4          digest_0.6.39      magrittr_2.0.5     evaluate_1.0.5     grid_4.6.2         timechange_0.4.0   RColorBrewer_1.1-3 fastmap_1.2.0      slider_0.3.3       e1071_1.7-17       DBI_1.3.0          bench_1.1.4        libgeos_3.11.1-3   codetools_0.2-20   cli_3.6.6          rlang_1.3.0        units_1.0-1        ivs_0.2.0          withr_3.0.3        yaml_2.3.12        otel_0.3.0         tools_4.6.2        tzdb_0.5.0         vctrs_0.7.3        R6_2.6.1           proxy_0.4-29       lifecycle_1.0.5    classInt_0.4-11    warp_0.2.3         pkgconfig_2.0.3    terra_1.9-50       pillar_1.11.1      gtable_0.3.6       glue_1.8.1         Rcpp_1.1.2         xfun_0.62          tidyselect_1.2.1   rstudioapi_0.19.0  knitr_1.52         farver_2.1.2       htmltools_0.5.9    rmarkdown_2.32     wk_0.9.5           compiler_4.6.2     S7_0.2.2
 ```
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-asd
