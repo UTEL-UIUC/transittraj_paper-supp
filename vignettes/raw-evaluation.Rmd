@@ -163,6 +163,8 @@ traj <- get_trajectory_fun(distance_df = mono_df)
 
 # Physical Realism
 
+## Methods
+
 We evaluate each dataset's -- raw (immediately after projection, `distance_df`) and clean (after monotonic correction, `mono_df`) -- position, speed, and acceleration point values for physical realism. For position, we check that points only move forward; for speed, we check that both AVL-recorded speeds and implied speeds (the slope between each point and the point immediately following it) do not exceed 55 mph; and for acceleration, we check that each point's implied acceleration (the slope in speeds between each point and the point immediately following it) is within $\left[ -0.24, 0.17 \right] \times g$. Below we define those ranges:
 
 ``` {r}
@@ -280,6 +282,8 @@ phys_eval <- function(distance_df, return_check = FALSE) {
   return(summ)
 }
 ```
+
+## Results
 
 Finally, we run this check on our raw and clean datasets:
 

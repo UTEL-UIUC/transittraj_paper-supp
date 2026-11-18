@@ -331,7 +331,7 @@ validate_monotonicity(mono_bidir_df, check_speed = TRUE)
 
 Next, we compare the changes made by each method:
 
-``` {r, eval = FALSE, echo = TRUE}
+``` {r}
 mono_deltas <- s6 %>%
   select(location_ping_id, distance, speed) %>%
   left_join(y = mono_forward_df %>%
@@ -449,6 +449,8 @@ knitr::include_graphics(path = "figures/figure_A2.png")
 The speed changes made in the two approaches are very similar, though the bidirectional makes some larger (~0.1-1 m/s) changes not made by the forward direction. The magnitude of distance changes is slightly smaller, but more importantly, becomes symmetrical for the bidirectional approach. Keep in mind that the width of these violin plots are determined *within* each direction level and are not comparable between directions.
 
 # Physical Realism
+
+## Methods
 
 We here evaluate how well the dataset aligns with our physical expectations of a bus's movements. Check our our main data evaluation vignette for a more thorough discussion of these methods.
 
@@ -570,6 +572,8 @@ phys_eval <- function(distance_df, return_check = FALSE) {
 }
 ```
 
+## Results
+
 Running the function & printing the results:
 
 ``` {r}
@@ -625,6 +629,8 @@ write.csv(x = eval_phys_piv,
 The proposed bidirectional method improves both acceleration and implied speeds.
 
 # Data Source Alignment
+
+## Methods
 
 We have a dataset of automatic passenger counter (APC) data, `apc_df`, loaded into our `RStudio` environment. Check out our main data evaluation vignette for a more detailed discussion of this dataset.
 
@@ -784,6 +790,8 @@ avl_apc_summ <- function(avl_apc) {
   return(summ)
 }
 ```
+
+## Results
 
 With this, we run the above function to evaluate the data quality across the raw AVL, the fully-cleaned monotonic AVL, and the fit trajectory:
 
@@ -1030,6 +1038,8 @@ res <- bind_rows(res_list)
 saveRDS(res,
         "C:\\Users\\obrie\\OneDrive - University of Illinois - Urbana\\IndyGo Project\\Analysis_new\\results\\cross_validation\\mono_CV_residuals_11-13-2026.rds")
 ```
+
+## Results
 
 We can now create some summary tables.
 

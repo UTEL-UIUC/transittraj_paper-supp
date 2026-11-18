@@ -366,6 +366,9 @@ cat("Points w/ speed change: ", n_s_changed_for, " (forward), ",
     n_d_changed_bi, " (bidirectional)",
     "\nTotal points: ", total_n,
     sep = "")
+#> Points w/ speed change: 564607 (forward), 566111 (bidirectional)
+#> Points w/ distance change: 234733 (forward), 307410 (bidirectional)
+#> Total points: 1304499
 ```
 
 The bidirectional approach adjusts far more distance points, and slightly fewer speed points. Below we plot the distribution of these changes
@@ -441,6 +444,8 @@ mono_changes_combo
 The speed changes made in the two approaches are very similar, though the bidirectional makes some larger (~0.1-1 m/s) changes not made by the forward direction. The magnitude of distance changes is slightly smaller, but more importantly, becomes symmetrical for the bidirectional approach. Keep in mind that the width of these violin plots are determined *within* each direction level and are not comparable between directions.
 
 # Physical Realism
+
+## Methods
 
 We here evaluate how well the dataset aligns with our physical expectations of a bus's movements. Check our our main data evaluation vignette for a more thorough discussion of these methods.
 
@@ -564,6 +569,8 @@ phys_eval <- function(distance_df, return_check = FALSE) {
 }
 ```
 
+## Results
+
 Running the function & printing the results:
 
 
@@ -629,6 +636,8 @@ knitr::kable(eval_phys_piv)
 The proposed bidirectional method improves both acceleration and implied speeds.
 
 # Data Source Alignment
+
+## Methods
 
 We have a dataset of automatic passenger counter (APC) data, `apc_df`, loaded into our `RStudio` environment. Check out our main data evaluation vignette for a more detailed discussion of this dataset.
 
@@ -790,6 +799,8 @@ avl_apc_summ <- function(avl_apc) {
   return(summ)
 }
 ```
+
+## Results
 
 With this, we run the above function to evaluate the data quality across the raw AVL, the fully-cleaned monotonic AVL, and the fit trajectory:
 
@@ -1050,6 +1061,8 @@ res <- bind_rows(res_list)
 
 
 
+## Results
+
 We can now create some summary tables.
 
 
@@ -1179,7 +1192,7 @@ sessionInfo()
 #>  [1] scales_1.4.0      marquee_1.2.1     patchwork_1.3.2   sf_1.1-3          lubridate_1.9.5   forcats_1.0.1     stringr_1.6.0     dplyr_1.2.1       purrr_1.2.2       readr_2.2.0       tidyr_1.3.2       tibble_3.3.1      ggplot2_4.0.3     tidyverse_2.0.0   transittraj_1.2.0
 #> 
 #> loaded via a namespace (and not attached):
-#>  [1] utf8_1.2.6         generics_0.1.4     class_7.3-24       geos_0.2.5         KernSmooth_2.23-27 stringi_1.8.9      hms_1.1.4          digest_0.6.39      magrittr_2.0.5     evaluate_1.0.5     grid_4.6.2         timechange_0.4.0   RColorBrewer_1.1-3 fastmap_1.2.0      slider_0.3.3       e1071_1.7-17       DBI_1.3.0          bench_1.1.4        libgeos_3.11.1-3   codetools_0.2-20   cli_3.6.6          rlang_1.3.0        units_1.0-1        ivs_0.2.0          withr_3.0.3        yaml_2.3.12        otel_0.3.0         tools_4.6.2        tzdb_0.5.0         vctrs_0.7.3        R6_2.6.1           proxy_0.4-29       lifecycle_1.0.5    classInt_0.4-11    warp_0.2.3         pkgconfig_2.0.3    terra_1.9-50       pillar_1.11.1      gtable_0.3.6       glue_1.8.1         Rcpp_1.1.2         xfun_0.62          tidyselect_1.2.1   rstudioapi_0.19.0  knitr_1.52         farver_2.1.2       htmltools_0.5.9    rmarkdown_2.32     wk_0.9.5           compiler_4.6.2     S7_0.2.2
+#>  [1] utf8_1.2.6         generics_0.1.4     class_7.3-24       geos_0.2.5         KernSmooth_2.23-27 stringi_1.8.9      hms_1.1.4          digest_0.6.39      magrittr_2.0.5     evaluate_1.0.5     grid_4.6.2         timechange_0.4.0   RColorBrewer_1.1-3 fastmap_1.2.0      slider_0.3.3       e1071_1.7-17       DBI_1.3.0          libgeos_3.11.1-3   codetools_0.2-20   cli_3.6.6          rlang_1.3.0        units_1.0-1        ivs_0.2.0          withr_3.0.3        yaml_2.3.12        otel_0.3.0         tools_4.6.2        tzdb_0.5.0         vctrs_0.7.3        R6_2.6.1           proxy_0.4-29       lifecycle_1.0.5    classInt_0.4-11    warp_0.2.3         pkgconfig_2.0.3    terra_1.9-50       pillar_1.11.1      gtable_0.3.6       glue_1.8.1         Rcpp_1.1.2         xfun_0.62          tidyselect_1.2.1   rstudioapi_0.19.0  knitr_1.52         farver_2.1.2       htmltools_0.5.9    rmarkdown_2.32     wk_0.9.5           compiler_4.6.2     S7_0.2.2
 ```
 
 
