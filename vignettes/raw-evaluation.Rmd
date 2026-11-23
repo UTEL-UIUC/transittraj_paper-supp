@@ -37,6 +37,9 @@ library(ggspatial)
 library(patchwork)
 library(marquee)
 library(basemaps)
+
+# Seed -- for bootstrap later
+set.seed(0)
 ```
 
 ``` {r}
@@ -1007,9 +1010,7 @@ saveRDS(res,
         "C:\\Users\\obrie\\OneDrive - University of Illinois - Urbana\\IndyGo Project\\Analysis_new\\results\\cross_validation\\CV_residuals_batch2_11-11-2026.rds")
 ```
 
-We can now create some summary tables.
-
-``` {r, echo = FALSE, eval = TRUE}
+``` {r import_res, echo = FALSE, eval = TRUE}
 # The above loop takes a very, very long time to run
 # To avoid re-running each time this vignette is knit, we saved the
 # results once and load them here
@@ -1019,39 +1020,102 @@ res <- rbind(
 )
 ```
 
+Now we have point-wise distance and speed errors. We'll calculate our aggregated prediction errors. Below we define a function to calculate the RMSE of the point-wise residuals:
+
 ``` {r}
-# Base summary
-summ <- res %>%
-  mutate(SE_dist_1D = res_dist_1D^2,
-         SE_speed = res_speed^2) %>%
+# Fundction to get RMSE by (method, freq)
+traj_rmse <- function(res) {
+  
+  summ <- res %>%
+    mutate(SE_dist_1D = res_dist_1D^2,
+           SE_speed = res_speed^2) %>%
+    group_by(method, freq) %>%
+    summarize(mean_1D_error = mean(res_dist_1D),
+              mean_speed_error = mean(res_speed),
+              n_test_obs = n(),
+              trips = length(unique(trip_id_performed)),
+              SSE_dist_1D = sum(SE_dist_1D),
+              SSE_speed = sum(SE_speed),
+              .groups = "keep") %>%
+    ungroup() %>%
+    mutate(MSE_dist_1D = SSE_dist_1D / n_test_obs,
+           MSE_speed = SSE_speed / n_test_obs,
+           RMSE_dist_1D = sqrt(MSE_dist_1D),
+           RMSE_speed = sqrt(MSE_speed)) %>%
+    select(freq, method, trips,
+           RMSE_dist_1D, RMSE_speed)
+  
+  return(summ)
+}
+```
+
+Next, we'll want the standard error of our RMSE estimates. Below we define a bootstrapped loop to resample our points and calculate the resample's RMSE:
+
+``` {r bootstrap}
+# Select only those residuals to go in the paper's summary table:
+res_tab <- res %>%
+  filter(freq <= 30)
+
+# Perform bootstrap loop
+B <- 500
+rmse_list <- list()
+for (i in 1:B) {
+  
+  # Resample DF
+  resampled <- res_tab %>%
+    slice_sample(
+      # Select number of rows: same is number in each group
+      prop = 1,
+      # Grouping variables
+      by = c(method, freq),
+      # Replace
+      replace = TRUE
+    )
+  
+  # Calculate new RMSE
+  iter_rmse <- traj_rmse(res = resampled)
+  
+  # Save
+  rmse_list[[i]] <- iter_rmse
+}
+
+# Bind results
+boot_rmse <- bind_rows(rmse_list,
+                       .id = "b_iter")
+```
+
+And we can now calculate the standard error of the RMSE estimates across all bootstrapped iterations:
+
+``` {r boot_se}
+rmse_se <- boot_rmse %>%
   group_by(method, freq) %>%
-  summarize(mean_1D_error = mean(res_dist_1D),
-            mean_speed_error = mean(res_speed),
-            n_test_obs = n(),
-            trips = length(unique(trip_id_performed)),
-            SSE_dist_1D = sum(SE_dist_1D),
-            SSE_speed = sum(SE_speed),
-            .groups = "keep") %>%
-  ungroup() %>%
-  mutate(MSE_dist_1D = SSE_dist_1D / n_test_obs,
-         MSE_speed = SSE_speed / n_test_obs,
-         RMSE_dist_1D = sqrt(MSE_dist_1D),
-         RMSE_speed = sqrt(MSE_speed),
+  summarize(sd_dist = sd(RMSE_dist_1D),
+            sd_speed = sd(RMSE_speed),
+            .groups = "keep")
+```
+
+Finally, we can create our final summary table:
+
+``` {r summarize}
+summ <- traj_rmse(res = res_tab)
+
+# Cleaned summary
+summ_clean <- summ %>%
+  left_join(y = rmse_se, by = c("method", "freq")) %>%
+  mutate(sd_dist = sprintf(sd_dist, fmt = "%.3f"),
+         sd_speed = sprintf(sd_speed, fmt = "%.4f"),
+         rmse_1d = sprintf(RMSE_dist_1D, fmt = "%.2f"),
+         rmse_speed = sprintf(RMSE_speed, fmt = "%.3f"),
+         rmse_1d = paste(rmse_1d, " (", sd_dist, ")", sep = ""),
+         rmse_speed = paste(rmse_speed, " (", sd_speed, ")", sep = ""),
          method = case_when(
            method == "VCHIP" ~ "VCHIP-ME",
            method == "PCHIP" ~ "PCHIP-ME",
            method == "Linear" ~ "Linear"
-         ))
-
-# Cleaned summary
-summ_clean <- summ %>%
-  mutate(rmse_1d = sprintf(RMSE_dist_1D, fmt = "%.2f"),
-         rmse_speed = sprintf(RMSE_speed, fmt = "%.2f")) %>%
-  select(freq, method, trips,
-         rmse_1d, rmse_speed,
-         ) %>%
+         )) %>%
+  select(-c(sd_dist, sd_speed,
+            RMSE_dist_1D, RMSE_speed)) %>%
   arrange(freq, method) %>%
-  filter((freq > 5) & (freq <= 30)) %>%
   rename(`RMSE of 1D Distance (m)` = rmse_1d,
          `RMSE of Speed (m/s)` = rmse_speed,
          `Simulated Frequency (sec)` = freq,
@@ -1059,9 +1123,9 @@ summ_clean <- summ %>%
          `Number of Trips` = trips)
 ```
 
-``` {r, eval = FALSE, echo = FALSE}
+``` {r, eval = TRUE, echo = FALSE}
 write.csv(x = summ_clean,
-          file = "C:\\Users\\obrie\\OneDrive - University of Illinois - Urbana\\IndyGo Project\\Deliverables\\Papers\\JPT_v2\\tables\\prediction_eval_11-13-26.csv")
+          file = "C:\\Users\\obrie\\OneDrive - University of Illinois - Urbana\\IndyGo Project\\Deliverables\\Papers\\JPT_v2\\tables\\prediction_eval_11-22-26.csv")
 ```
 
 Next, we'll generate a plot the distance and speed RMSEs against polling frequencies to visualize how they scale. We'll show and discuss the plot in the Results section.

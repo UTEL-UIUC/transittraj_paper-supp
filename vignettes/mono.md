@@ -30,6 +30,9 @@ library(scales)
 my_r <- "#f43155"
 my_b <- "#2f6ff8"
 my_g <- "#00A884"
+
+# Set seed -- for bootstrap later
+set.seed(0)
 ```
 
 We perform this check on AVL data from IndyGo's northbound Red Line BRT service. We accessed IndyGo’s AVL data from their Swiftly endpoint, after which it was reformatted to meet the TIDES standards required by `transittraj` and stored in the dataframe `avl_df`. We do not have permission to share this dataset, and so have pre-loaded it into our RStudio session before running this vignette..
@@ -1061,37 +1064,101 @@ res <- bind_rows(res_list)
 
 
 
+
+
+## Bootstrapped Standard Errors
+
+Now we have point-wise distance and speed errors. We'll calculate our aggregated prediction errors. Below we define a function to calculate the RMSE of the point-wise residuals:
+
+
+``` r
+# Fundction to get RMSE by (method, freq)
+traj_rmse <- function(res) {
+  
+  summ <- res %>%
+    mutate(SE_dist_1D = res_dist_1D^2,
+           SE_speed = res_speed^2) %>%
+    group_by(method, freq) %>%
+    summarize(mean_1D_error = mean(res_dist_1D),
+              mean_speed_error = mean(res_speed),
+              n_test_obs = n(),
+              trips = length(unique(trip_id_performed)),
+              SSE_dist_1D = sum(SE_dist_1D),
+              SSE_speed = sum(SE_speed),
+              .groups = "keep") %>%
+    ungroup() %>%
+    mutate(MSE_dist_1D = SSE_dist_1D / n_test_obs,
+           MSE_speed = SSE_speed / n_test_obs,
+           RMSE_dist_1D = sqrt(MSE_dist_1D),
+           RMSE_speed = sqrt(MSE_speed)) %>%
+    select(freq, method, trips,
+           RMSE_dist_1D, RMSE_speed)
+  
+  return(summ)
+}
+```
+
+Next, we'll want the standard error of our RMSE estimates. Below we define a bootstrapped loop to resample our points and calculate the resample's RMSE:
+
+
+``` r
+# Perform bootstrap loop
+B <- 500
+rmse_list <- list()
+for (i in 1:B) {
+  
+  # Resample DF
+  resampled <- res %>%
+    slice_sample(
+      # Select number of rows: same is number in each group
+      prop = 1,
+      # Grouping variables
+      by = c(method, freq),
+      # Replace
+      replace = TRUE
+    )
+  
+  # Calculate new RMSE
+  iter_rmse <- traj_rmse(res = resampled)
+  
+  # Save
+  rmse_list[[i]] <- iter_rmse
+}
+
+# Bind results
+boot_rmse <- bind_rows(rmse_list,
+                       .id = "b_iter")
+```
+
+And we can now calculate the standard error of the RMSE estimates across all bootstrapped iterations:
+
+
+``` r
+rmse_se <- boot_rmse %>%
+  group_by(method, freq) %>%
+  summarize(sd_dist = sd(RMSE_dist_1D),
+            sd_speed = sd(RMSE_speed),
+            .groups = "keep")
+```
+
 ## Results
 
 We can now create some summary tables.
 
 
-
-
 ``` r
-# Base summary
-summ <- res %>%
-  mutate(SE_dist_1D = res_dist_1D^2,
-         SE_speed = res_speed^2) %>%
-  group_by(method, freq) %>%
-  summarize(mean_1D_error = mean(res_dist_1D),
-            mean_speed_error = mean(res_speed),
-            n_test_obs = n(),
-            trips = length(unique(trip_id_performed)),
-            SSE_dist_1D = sum(SE_dist_1D),
-            SSE_speed = sum(SE_speed),
-            .groups = "keep") %>%
-  ungroup() %>%
-  mutate(MSE_dist_1D = SSE_dist_1D / n_test_obs,
-         MSE_speed = SSE_speed / n_test_obs,
-         RMSE_dist_1D = sqrt(MSE_dist_1D),
-         RMSE_speed = sqrt(MSE_speed),
-         method = factor(method, levels = c("Forward", "Bidirectional")))
+summ <- traj_rmse(res)
 
 # Cleaned summary
 summ_clean <- summ %>%
-  mutate(rmse_1d = sprintf(RMSE_dist_1D, fmt = "%.2f"),
-         rmse_speed = sprintf(RMSE_speed, fmt = "%.2f")) %>%
+  left_join(y = rmse_se, by = c("method", "freq")) %>%
+  mutate(method = factor(method, levels = c("Forward", "Bidirectional")),
+         sd_dist = sprintf(sd_dist, fmt = "%.3f"),
+         sd_speed = sprintf(sd_speed, fmt = "%.4f"),
+         rmse_1d = sprintf(RMSE_dist_1D, fmt = "%.2f"),
+         rmse_speed = sprintf(RMSE_speed, fmt = "%.3f"),
+         rmse_1d = paste(rmse_1d, " (", sd_dist, ")", sep = ""),
+         rmse_speed = paste(rmse_speed, " (", sd_speed, ")", sep = "")) %>%
   arrange(freq, method) %>%
   mutate(delta_d = RMSE_dist_1D - lag(RMSE_dist_1D),
          delta_v = RMSE_speed - lag(RMSE_speed),
@@ -1128,18 +1195,18 @@ knitr::kable(summ_clean)
 
 
 
-| Simulated Frequency (sec)|Method        |Number of Trips |RMSE of Distance (m) |RMSE of Speed (m/s) |
-|-------------------------:|:-------------|:---------------|:--------------------|:-------------------|
-|                        10|Forward       |1,162           |8.10                 |1.15                |
-|                        10|Bidirectional |1,162           |6.10 (-24.70%)       |1.15 (-0.40%)       |
-|                        15|Forward       |1,159           |9.14                 |1.16                |
-|                        15|Bidirectional |1,159           |7.56 (-17.24%)       |1.16 (-0.14%)       |
-|                        20|Forward       |1,147           |10.86                |1.32                |
-|                        20|Bidirectional |1,147           |9.65 (-11.15%)       |1.32 (-0.05%)       |
-|                        25|Forward       |1,141           |13.33                |1.55                |
-|                        25|Bidirectional |1,141           |12.40 (-6.95%)       |1.55 (-0.03%)       |
-|                        30|Forward       |1,127           |16.50                |1.81                |
-|                        30|Bidirectional |1,127           |15.79 (-4.30%)       |1.81 (-0.02%)       |
+| Simulated Frequency (sec)|Method        |Number of Trips |RMSE of Distance (m)   |RMSE of Speed (m/s)     |
+|-------------------------:|:-------------|:---------------|:----------------------|:-----------------------|
+|                        10|Forward       |1,162           |8.10 (0.204)           |1.153 (0.0050)          |
+|                        10|Bidirectional |1,162           |6.10 (0.083) (-24.70%) |1.148 (0.0050) (-0.40%) |
+|                        15|Forward       |1,159           |9.14 (0.125)           |1.159 (0.0024)          |
+|                        15|Bidirectional |1,159           |7.56 (0.051) (-17.24%) |1.158 (0.0024) (-0.14%) |
+|                        20|Forward       |1,147           |10.86 (0.093)          |1.323 (0.0016)          |
+|                        20|Bidirectional |1,147           |9.65 (0.040) (-11.15%) |1.323 (0.0016) (-0.05%) |
+|                        25|Forward       |1,141           |13.33 (0.067)          |1.554 (0.0012)          |
+|                        25|Bidirectional |1,141           |12.40 (0.033) (-6.95%) |1.553 (0.0012) (-0.03%) |
+|                        30|Forward       |1,127           |16.50 (0.050)          |1.808 (0.0011)          |
+|                        30|Bidirectional |1,127           |15.79 (0.028) (-4.30%) |1.808 (0.0011) (-0.02%) |
 
 
 
@@ -1174,7 +1241,7 @@ version
 sessionInfo()
 #> R version 4.6.2 (2026-10-29 ucrt)
 #> Platform: x86_64-w64-mingw32/x64
-#> Running under: Windows 11 x64 (build 26200)
+#> Running under: Windows 11 x64 (build 26300)
 #> 
 #> Matrix products: default
 #>   LAPACK version 3.12.1
@@ -1192,7 +1259,7 @@ sessionInfo()
 #>  [1] scales_1.4.0      marquee_1.2.1     patchwork_1.3.2   sf_1.1-3          lubridate_1.9.5   forcats_1.0.1     stringr_1.6.0     dplyr_1.2.1       purrr_1.2.2       readr_2.2.0       tidyr_1.3.2       tibble_3.3.1      ggplot2_4.0.3     tidyverse_2.0.0   transittraj_1.2.0
 #> 
 #> loaded via a namespace (and not attached):
-#>  [1] utf8_1.2.6         generics_0.1.4     class_7.3-24       geos_0.2.5         KernSmooth_2.23-27 stringi_1.8.9      hms_1.1.4          digest_0.6.39      magrittr_2.0.5     evaluate_1.0.5     grid_4.6.2         timechange_0.4.0   RColorBrewer_1.1-3 fastmap_1.2.0      slider_0.3.3       e1071_1.7-17       DBI_1.3.0          libgeos_3.11.1-3   codetools_0.2-20   cli_3.6.6          rlang_1.3.0        units_1.0-1        ivs_0.2.0          withr_3.0.3        yaml_2.3.12        otel_0.3.0         tools_4.6.2        tzdb_0.5.0         vctrs_0.7.3        R6_2.6.1           proxy_0.4-29       lifecycle_1.0.5    classInt_0.4-11    warp_0.2.3         pkgconfig_2.0.3    terra_1.9-50       pillar_1.11.1      gtable_0.3.6       glue_1.8.1         Rcpp_1.1.2         xfun_0.62          tidyselect_1.2.1   rstudioapi_0.19.0  knitr_1.52         farver_2.1.2       htmltools_0.5.9    rmarkdown_2.32     wk_0.9.5           compiler_4.6.2     S7_0.2.2
+#>  [1] utf8_1.2.6         generics_0.1.4     class_7.3-24       geos_0.2.5         KernSmooth_2.23-27 stringi_1.8.9      hms_1.1.4          digest_0.6.39      magrittr_2.0.5     evaluate_1.0.5     grid_4.6.2         timechange_0.4.0   RColorBrewer_1.1-3 fastmap_1.2.0      slider_0.3.3       e1071_1.7-17       DBI_1.3.0          bench_1.1.4        libgeos_3.11.1-3   codetools_0.2-20   cli_3.6.6          rlang_1.3.0        units_1.0-1        ivs_0.2.0          withr_3.0.3        yaml_2.3.12        otel_0.3.0         tools_4.6.2        tzdb_0.5.0         vctrs_0.7.3        R6_2.6.1           proxy_0.4-29       lifecycle_1.0.5    classInt_0.4-11    warp_0.2.3         pkgconfig_2.0.3    terra_1.9-50       pillar_1.11.1      gtable_0.3.6       glue_1.8.1         Rcpp_1.1.2         xfun_0.62          tidyselect_1.2.1   rstudioapi_0.19.0  knitr_1.52         farver_2.1.2       htmltools_0.5.9    rmarkdown_2.32     wk_0.9.5           compiler_4.6.2     S7_0.2.2
 ```
 
 

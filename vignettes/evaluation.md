@@ -29,6 +29,9 @@ library(ggspatial)
 library(patchwork)
 library(marquee)
 library(basemaps)
+
+# Seed -- for bootstrap later
+set.seed(0)
 ```
 
 
@@ -341,20 +344,13 @@ We have a dataset of automatic passenger counter (APC) data, `apc_df`, loaded in
 
 ``` r
 head(apc_df)
-#>   service_date           trip_id_performed                           stop_name                t_in               t_out
-#> 1   2024-11-01 2024-11-01-t1FB-b232E-sl3-N                               CTC-G 2024-11-01 05:20:12 2024-11-01 05:20:12
-#> 2   2024-11-01 2024-11-01-t1FB-b232E-sl3-N               Statehouse Station NB 2024-11-01 05:21:36 2024-11-01 05:21:36
-#> 3   2024-11-01 2024-11-01-t1FB-b232E-sl3-N Capitol Ave & Vermont St Station NB 2024-11-01 05:22:42 2024-11-01 05:22:53
-#> 4   2024-11-01 2024-11-01-t1FB-b232E-sl3-N     Capitol Ave & 9th St Station NB 2024-11-01 05:24:56 2024-11-01 05:24:56
-#> 5   2024-11-01 2024-11-01-t1FB-b232E-sl3-N    Capitol Ave & 14th St Station NB 2024-11-01 05:26:01 2024-11-01 05:26:01
-#> 6   2024-11-01 2024-11-01-t1FB-b232E-sl3-N                IU Health Station NB 2024-11-01 05:26:47 2024-11-01 05:26:47
-#>   dwell trip_in_traj
-#> 1     0         TRUE
-#> 2     0         TRUE
-#> 3    11         TRUE
-#> 4     0         TRUE
-#> 5     0         TRUE
-#> 6     0         TRUE
+#>   service_date           trip_id_performed                           stop_name                t_in               t_out dwell trip_in_traj
+#> 1   2024-11-01 2024-11-01-t1FB-b232E-sl3-N                               CTC-G 2024-11-01 05:20:12 2024-11-01 05:20:12     0         TRUE
+#> 2   2024-11-01 2024-11-01-t1FB-b232E-sl3-N               Statehouse Station NB 2024-11-01 05:21:36 2024-11-01 05:21:36     0         TRUE
+#> 3   2024-11-01 2024-11-01-t1FB-b232E-sl3-N Capitol Ave & Vermont St Station NB 2024-11-01 05:22:42 2024-11-01 05:22:53    11         TRUE
+#> 4   2024-11-01 2024-11-01-t1FB-b232E-sl3-N     Capitol Ave & 9th St Station NB 2024-11-01 05:24:56 2024-11-01 05:24:56     0         TRUE
+#> 5   2024-11-01 2024-11-01-t1FB-b232E-sl3-N    Capitol Ave & 14th St Station NB 2024-11-01 05:26:01 2024-11-01 05:26:01     0         TRUE
+#> 6   2024-11-01 2024-11-01-t1FB-b232E-sl3-N                IU Health Station NB 2024-11-01 05:26:47 2024-11-01 05:26:47     0         TRUE
 ```
 
 
@@ -1056,44 +1052,108 @@ res <- bind_rows(res_list)
 
 
 
-We can now create some summary tables.
 
 
+Now we have point-wise distance and speed errors. We'll calculate our aggregated prediction errors. Below we define a function to calculate the RMSE of the point-wise residuals:
 
 
 ``` r
-# Base summary
-summ <- res %>%
-  mutate(SE_dist_1D = res_dist_1D^2,
-         SE_speed = res_speed^2) %>%
+# Fundction to get RMSE by (method, freq)
+traj_rmse <- function(res) {
+  
+  summ <- res %>%
+    mutate(SE_dist_1D = res_dist_1D^2,
+           SE_speed = res_speed^2) %>%
+    group_by(method, freq) %>%
+    summarize(mean_1D_error = mean(res_dist_1D),
+              mean_speed_error = mean(res_speed),
+              n_test_obs = n(),
+              trips = length(unique(trip_id_performed)),
+              SSE_dist_1D = sum(SE_dist_1D),
+              SSE_speed = sum(SE_speed),
+              .groups = "keep") %>%
+    ungroup() %>%
+    mutate(MSE_dist_1D = SSE_dist_1D / n_test_obs,
+           MSE_speed = SSE_speed / n_test_obs,
+           RMSE_dist_1D = sqrt(MSE_dist_1D),
+           RMSE_speed = sqrt(MSE_speed)) %>%
+    select(freq, method, trips,
+           RMSE_dist_1D, RMSE_speed)
+  
+  return(summ)
+}
+```
+
+Next, we'll want the standard error of our RMSE estimates. Below we define a bootstrapped loop to resample our points and calculate the resample's RMSE:
+
+
+``` r
+# Select only those residuals to go in the paper's summary table:
+res_tab <- res %>%
+  filter(freq <= 30)
+
+# Perform bootstrap loop
+B <- 500
+rmse_list <- list()
+for (i in 1:B) {
+  
+  # Resample DF
+  resampled <- res_tab %>%
+    slice_sample(
+      # Select number of rows: same is number in each group
+      prop = 1,
+      # Grouping variables
+      by = c(method, freq),
+      # Replace
+      replace = TRUE
+    )
+  
+  # Calculate new RMSE
+  iter_rmse <- traj_rmse(res = resampled)
+  
+  # Save
+  rmse_list[[i]] <- iter_rmse
+}
+
+# Bind results
+boot_rmse <- bind_rows(rmse_list,
+                       .id = "b_iter")
+```
+
+And we can now calculate the standard error of the RMSE estimates across all bootstrapped iterations:
+
+
+``` r
+rmse_se <- boot_rmse %>%
   group_by(method, freq) %>%
-  summarize(mean_1D_error = mean(res_dist_1D),
-            mean_speed_error = mean(res_speed),
-            n_test_obs = n(),
-            trips = length(unique(trip_id_performed)),
-            SSE_dist_1D = sum(SE_dist_1D),
-            SSE_speed = sum(SE_speed),
-            .groups = "keep") %>%
-  ungroup() %>%
-  mutate(MSE_dist_1D = SSE_dist_1D / n_test_obs,
-         MSE_speed = SSE_speed / n_test_obs,
-         RMSE_dist_1D = sqrt(MSE_dist_1D),
-         RMSE_speed = sqrt(MSE_speed),
+  summarize(sd_dist = sd(RMSE_dist_1D),
+            sd_speed = sd(RMSE_speed),
+            .groups = "keep")
+```
+
+Finally, we can create our final summary table:
+
+
+``` r
+summ <- traj_rmse(res = res_tab)
+
+# Cleaned summary
+summ_clean <- summ %>%
+  left_join(y = rmse_se, by = c("method", "freq")) %>%
+  mutate(sd_dist = sprintf(sd_dist, fmt = "%.3f"),
+         sd_speed = sprintf(sd_speed, fmt = "%.4f"),
+         rmse_1d = sprintf(RMSE_dist_1D, fmt = "%.2f"),
+         rmse_speed = sprintf(RMSE_speed, fmt = "%.3f"),
+         rmse_1d = paste(rmse_1d, " (", sd_dist, ")", sep = ""),
+         rmse_speed = paste(rmse_speed, " (", sd_speed, ")", sep = ""),
          method = case_when(
            method == "VCHIP" ~ "VCHIP-ME",
            method == "PCHIP" ~ "PCHIP-ME",
            method == "Linear" ~ "Linear"
-         ))
-
-# Cleaned summary
-summ_clean <- summ %>%
-  mutate(rmse_1d = sprintf(RMSE_dist_1D, fmt = "%.2f"),
-         rmse_speed = sprintf(RMSE_speed, fmt = "%.2f")) %>%
-  select(freq, method, trips,
-         rmse_1d, rmse_speed,
-         ) %>%
+         )) %>%
+  select(-c(sd_dist, sd_speed,
+            RMSE_dist_1D, RMSE_speed)) %>%
   arrange(freq, method) %>%
-  filter((freq > 5) & (freq <= 30)) %>%
   rename(`RMSE of 1D Distance (m)` = rmse_1d,
          `RMSE of Speed (m/s)` = rmse_speed,
          `Simulated Frequency (sec)` = freq,
@@ -1481,21 +1541,21 @@ knitr::kable(summ_clean)
 
 | Simulated Frequency (sec)|Method   | Number of Trips|RMSE of 1D Distance (m) |RMSE of Speed (m/s) |
 |-------------------------:|:--------|---------------:|:-----------------------|:-------------------|
-|                        10|Linear   |            1162|7.91                    |1.06                |
-|                        10|PCHIP-ME |            1162|6.82                    |1.12                |
-|                        10|VCHIP-ME |            1162|6.10                    |1.15                |
-|                        15|Linear   |            1159|12.67                   |1.60                |
-|                        15|PCHIP-ME |            1159|9.76                    |1.34                |
-|                        15|VCHIP-ME |            1159|7.56                    |1.16                |
-|                        20|Linear   |            1147|18.21                   |2.09                |
-|                        20|PCHIP-ME |            1147|14.29                   |1.74                |
-|                        20|VCHIP-ME |            1147|9.65                    |1.32                |
-|                        25|Linear   |            1141|24.27                   |2.53                |
-|                        25|PCHIP-ME |            1141|20.05                   |2.17                |
-|                        25|VCHIP-ME |            1141|12.40                   |1.55                |
-|                        30|Linear   |            1127|30.58                   |2.89                |
-|                        30|PCHIP-ME |            1127|26.44                   |2.58                |
-|                        30|VCHIP-ME |            1127|15.79                   |1.81                |
+|                        10|Linear   |            1162|7.91 (0.033)            |1.058 (0.0044)      |
+|                        10|PCHIP-ME |            1162|6.82 (0.077)            |1.115 (0.0047)      |
+|                        10|VCHIP-ME |            1162|6.10 (0.087)            |1.148 (0.0049)      |
+|                        15|Linear   |            1159|12.67 (0.025)           |1.598 (0.0021)      |
+|                        15|PCHIP-ME |            1159|9.76 (0.045)            |1.339 (0.0022)      |
+|                        15|VCHIP-ME |            1159|7.56 (0.056)            |1.158 (0.0026)      |
+|                        20|Linear   |            1147|18.21 (0.019)           |2.095 (0.0015)      |
+|                        20|PCHIP-ME |            1147|14.29 (0.028)           |1.738 (0.0015)      |
+|                        20|VCHIP-ME |            1147|9.65 (0.041)            |1.323 (0.0016)      |
+|                        25|Linear   |            1141|24.27 (0.018)           |2.525 (0.0014)      |
+|                        25|PCHIP-ME |            1141|20.05 (0.023)           |2.173 (0.0014)      |
+|                        25|VCHIP-ME |            1141|12.40 (0.031)           |1.553 (0.0012)      |
+|                        30|Linear   |            1127|30.58 (0.018)           |2.892 (0.0013)      |
+|                        30|PCHIP-ME |            1127|26.44 (0.020)           |2.577 (0.0012)      |
+|                        30|VCHIP-ME |            1127|15.79 (0.027)           |1.808 (0.0011)      |
 
 
 
@@ -1574,14 +1634,13 @@ version
 sessionInfo()
 #> R version 4.6.2 (2026-10-29 ucrt)
 #> Platform: x86_64-w64-mingw32/x64
-#> Running under: Windows 11 x64 (build 26200)
+#> Running under: Windows 11 x64 (build 26300)
 #> 
 #> Matrix products: default
 #>   LAPACK version 3.12.1
 #> 
 #> locale:
-#> [1] LC_COLLATE=English_United States.utf8  LC_CTYPE=English_United States.utf8    LC_MONETARY=English_United States.utf8
-#> [4] LC_NUMERIC=C                           LC_TIME=English_United States.utf8    
+#> [1] LC_COLLATE=English_United States.utf8  LC_CTYPE=English_United States.utf8    LC_MONETARY=English_United States.utf8 LC_NUMERIC=C                           LC_TIME=English_United States.utf8    
 #> 
 #> time zone: America/Chicago
 #> tzcode source: internal
@@ -1590,21 +1649,11 @@ sessionInfo()
 #> [1] stats     graphics  grDevices utils     datasets  methods   base     
 #> 
 #> other attached packages:
-#>  [1] basemaps_0.1.1    marquee_1.2.1     patchwork_1.3.2   ggspatial_1.1.11  stplanr_1.2.3     sf_1.1-3         
-#>  [7] lubridate_1.9.5   forcats_1.0.1     stringr_1.6.0     dplyr_1.2.1       purrr_1.2.2       readr_2.2.0      
-#> [13] tidyr_1.3.2       tibble_3.3.1      ggplot2_4.0.3     tidyverse_2.0.0   transittraj_1.2.0
+#>  [1] basemaps_0.1.1    marquee_1.2.1     patchwork_1.3.2   ggspatial_1.1.11  stplanr_1.2.3     sf_1.1-3          lubridate_1.9.5   forcats_1.0.1     stringr_1.6.0     dplyr_1.2.1       purrr_1.2.2       readr_2.2.0       tidyr_1.3.2       tibble_3.3.1      ggplot2_4.0.3     tidyverse_2.0.0   transittraj_1.2.0
 #> 
 #> loaded via a namespace (and not attached):
-#>  [1] gtable_0.3.6       xfun_0.62          ivs_0.2.0          bench_1.1.4        tzdb_0.5.0         vctrs_0.7.3       
-#>  [7] tools_4.6.2        generics_0.1.4     curl_8.1.0         parallel_4.6.2     proxy_0.4-29       pkgconfig_2.0.3   
-#> [13] KernSmooth_2.23-27 RColorBrewer_1.1-3 S7_0.2.2           lifecycle_1.0.5    compiler_4.6.2     farver_2.1.2      
-#> [19] geos_0.2.5         terra_1.9-50       libgeos_3.11.1-3   codetools_0.2-20   htmltools_0.5.9    class_7.3-24      
-#> [25] yaml_2.3.12        pillar_1.11.1      classInt_0.4-11    slippymath_0.3.1   wk_0.9.5           magick_2.9.1      
-#> [31] tidyselect_1.2.1   digest_0.6.39      stringi_1.8.9      fastmap_1.2.0      grid_4.6.2         cli_3.6.6         
-#> [37] magrittr_2.0.5     utf8_1.2.6         e1071_1.7-17       withr_3.0.3        scales_1.4.0       warp_0.2.3        
-#> [43] timechange_0.4.0   slider_0.3.3       rmarkdown_2.32     httr_1.4.9         otel_0.3.0         hms_1.1.4         
-#> [49] pbapply_1.7-5      evaluate_1.0.5     knitr_1.52         rlang_1.3.0        Rcpp_1.1.2         glue_1.8.1        
-#> [55] DBI_1.3.0          rstudioapi_0.19.0  R6_2.6.1           units_1.0-1
+#>  [1] gtable_0.3.6       xfun_0.62          ivs_0.2.0          bench_1.1.4        tzdb_0.5.0         vctrs_0.7.3        tools_4.6.2        generics_0.1.4     curl_8.1.0         parallel_4.6.2     proxy_0.4-29       pkgconfig_2.0.3    KernSmooth_2.23-27 RColorBrewer_1.1-3 S7_0.2.2           lifecycle_1.0.5    compiler_4.6.2     farver_2.1.2       geos_0.2.5         terra_1.9-50       libgeos_3.11.1-3   codetools_0.2-20   htmltools_0.5.9    class_7.3-24       yaml_2.3.12        pillar_1.11.1      classInt_0.4-11    slippymath_0.3.1   wk_0.9.5           magick_2.9.1       tidyselect_1.2.1   digest_0.6.39      stringi_1.8.9      fastmap_1.2.0      grid_4.6.2         cli_3.6.6          magrittr_2.0.5     utf8_1.2.6         e1071_1.7-17       withr_3.0.3        scales_1.4.0       warp_0.2.3         timechange_0.4.0   slider_0.3.3       rmarkdown_2.32     httr_1.4.9         otel_0.3.0         hms_1.1.4          pbapply_1.7-5      evaluate_1.0.5     knitr_1.52         rlang_1.3.0       
+#> [53] Rcpp_1.1.2         glue_1.8.1         DBI_1.3.0          rstudioapi_0.19.0  R6_2.6.1           units_1.0-1
 ```
 
 

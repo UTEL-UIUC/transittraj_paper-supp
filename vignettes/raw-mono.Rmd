@@ -38,6 +38,9 @@ library(scales)
 my_r <- "#f43155"
 my_b <- "#2f6ff8"
 my_g <- "#00A884"
+
+# Set seed -- for bootstrap later
+set.seed(0)
 ```
 
 We perform this check on AVL data from IndyGo's northbound Red Line BRT service. We accessed IndyGo’s AVL data from their Swiftly endpoint, after which it was reformatted to meet the TIDES standards required by `transittraj` and stored in the dataframe `avl_df`. We do not have permission to share this dataset, and so have pre-loaded it into our RStudio session before running this vignette..
@@ -1039,38 +1042,99 @@ saveRDS(res,
         "C:\\Users\\obrie\\OneDrive - University of Illinois - Urbana\\IndyGo Project\\Analysis_new\\results\\cross_validation\\mono_CV_residuals_11-13-2026.rds")
 ```
 
-## Results
-
-We can now create some summary tables.
-
 ``` {r, echo = FALSE, eval = TRUE}
 res <- readRDS("C:\\Users\\obrie\\OneDrive - University of Illinois - Urbana\\IndyGo Project\\Analysis_new\\results\\cross_validation\\mono_CV_residuals_11-13-2026.rds")
 ```
 
+## Bootstrapped Standard Errors
+
+Now we have point-wise distance and speed errors. We'll calculate our aggregated prediction errors. Below we define a function to calculate the RMSE of the point-wise residuals:
+
 ``` {r}
-# Base summary
-summ <- res %>%
-  mutate(SE_dist_1D = res_dist_1D^2,
-         SE_speed = res_speed^2) %>%
+# Fundction to get RMSE by (method, freq)
+traj_rmse <- function(res) {
+  
+  summ <- res %>%
+    mutate(SE_dist_1D = res_dist_1D^2,
+           SE_speed = res_speed^2) %>%
+    group_by(method, freq) %>%
+    summarize(mean_1D_error = mean(res_dist_1D),
+              mean_speed_error = mean(res_speed),
+              n_test_obs = n(),
+              trips = length(unique(trip_id_performed)),
+              SSE_dist_1D = sum(SE_dist_1D),
+              SSE_speed = sum(SE_speed),
+              .groups = "keep") %>%
+    ungroup() %>%
+    mutate(MSE_dist_1D = SSE_dist_1D / n_test_obs,
+           MSE_speed = SSE_speed / n_test_obs,
+           RMSE_dist_1D = sqrt(MSE_dist_1D),
+           RMSE_speed = sqrt(MSE_speed)) %>%
+    select(freq, method, trips,
+           RMSE_dist_1D, RMSE_speed)
+  
+  return(summ)
+}
+```
+
+Next, we'll want the standard error of our RMSE estimates. Below we define a bootstrapped loop to resample our points and calculate the resample's RMSE:
+
+``` {r bootstrap}
+# Perform bootstrap loop
+B <- 500
+rmse_list <- list()
+for (i in 1:B) {
+  
+  # Resample DF
+  resampled <- res %>%
+    slice_sample(
+      # Select number of rows: same is number in each group
+      prop = 1,
+      # Grouping variables
+      by = c(method, freq),
+      # Replace
+      replace = TRUE
+    )
+  
+  # Calculate new RMSE
+  iter_rmse <- traj_rmse(res = resampled)
+  
+  # Save
+  rmse_list[[i]] <- iter_rmse
+}
+
+# Bind results
+boot_rmse <- bind_rows(rmse_list,
+                       .id = "b_iter")
+```
+
+And we can now calculate the standard error of the RMSE estimates across all bootstrapped iterations:
+
+``` {r boot_se}
+rmse_se <- boot_rmse %>%
   group_by(method, freq) %>%
-  summarize(mean_1D_error = mean(res_dist_1D),
-            mean_speed_error = mean(res_speed),
-            n_test_obs = n(),
-            trips = length(unique(trip_id_performed)),
-            SSE_dist_1D = sum(SE_dist_1D),
-            SSE_speed = sum(SE_speed),
-            .groups = "keep") %>%
-  ungroup() %>%
-  mutate(MSE_dist_1D = SSE_dist_1D / n_test_obs,
-         MSE_speed = SSE_speed / n_test_obs,
-         RMSE_dist_1D = sqrt(MSE_dist_1D),
-         RMSE_speed = sqrt(MSE_speed),
-         method = factor(method, levels = c("Forward", "Bidirectional")))
+  summarize(sd_dist = sd(RMSE_dist_1D),
+            sd_speed = sd(RMSE_speed),
+            .groups = "keep")
+```
+
+## Results
+
+We can now create some summary tables.
+
+``` {r}
+summ <- traj_rmse(res)
 
 # Cleaned summary
 summ_clean <- summ %>%
-  mutate(rmse_1d = sprintf(RMSE_dist_1D, fmt = "%.2f"),
-         rmse_speed = sprintf(RMSE_speed, fmt = "%.2f")) %>%
+  left_join(y = rmse_se, by = c("method", "freq")) %>%
+  mutate(method = factor(method, levels = c("Forward", "Bidirectional")),
+         sd_dist = sprintf(sd_dist, fmt = "%.3f"),
+         sd_speed = sprintf(sd_speed, fmt = "%.4f"),
+         rmse_1d = sprintf(RMSE_dist_1D, fmt = "%.2f"),
+         rmse_speed = sprintf(RMSE_speed, fmt = "%.3f"),
+         rmse_1d = paste(rmse_1d, " (", sd_dist, ")", sep = ""),
+         rmse_speed = paste(rmse_speed, " (", sd_speed, ")", sep = "")) %>%
   arrange(freq, method) %>%
   mutate(delta_d = RMSE_dist_1D - lag(RMSE_dist_1D),
          delta_v = RMSE_speed - lag(RMSE_speed),
@@ -1105,9 +1169,9 @@ summ_clean <- summ %>%
 knitr::kable(summ_clean)
 ```
 
-``` {r, eval = FALSE, echo = FALSE}
+``` {r, eval = TRUE, echo = FALSE}
 write.csv(x = summ_clean,
-          file = "C:\\Users\\obrie\\OneDrive - University of Illinois - Urbana\\IndyGo Project\\Deliverables\\Papers\\JPT_v2\\tables\\mono_prediction_eval_11-13-26.csv")
+          file = "C:\\Users\\obrie\\OneDrive - University of Illinois - Urbana\\IndyGo Project\\Deliverables\\Papers\\JPT_v2\\tables\\mono_prediction_eval_11-22-26.csv")
 ```
 
 The proposed bidirectional approach substantially reduces prediction RMSE.
