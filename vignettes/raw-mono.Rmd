@@ -39,8 +39,9 @@ my_r <- "#f43155"
 my_b <- "#2f6ff8"
 my_g <- "#00A884"
 
-# Set seed -- for bootstrap later
+# Bootstrapping parameters
 set.seed(0)
+B <- 1:1000
 ```
 
 We perform this check on AVL data from IndyGo's northbound Red Line BRT service. We accessed IndyGo’s AVL data from their Swiftly endpoint, after which it was reformatted to meet the TIDES standards required by `transittraj` and stored in the dataframe `avl_df`. We do not have permission to share this dataset, and so have pre-loaded it into our RStudio session before running this vignette..
@@ -469,7 +470,8 @@ stop_cutoff <- 3 / 2.237 # mph -> m/s
 Next, defining a function to evaluate these:
 
 ``` {r}
-phys_eval <- function(distance_df, return_check = FALSE) {
+# Find pointwise violations
+points_vio <- function(distance_df) {
   
   # Get point-wise speeds & check for point-wise violations
   check_df <- distance_df %>%
@@ -498,13 +500,14 @@ phys_eval <- function(distance_df, return_check = FALSE) {
            violate_implied_accel = (implied_accel < allowable_accel[1]) |
              (implied_accel > allowable_accel[2]))
   
-  # if want to return point-by-point check
-  if (return_check) {
-    return(check_df)
-  }
+  return(check_df)
+}
+
+# Aggreagte pointwise violations into trip-wise violations
+trips_vio <- function(point_check_df) {
   
   # Get violations by trip
-  trips_df <- check_df %>%
+  trips_df <- point_check_df %>%
     select(-c(cummax_dist, delta_dist, delta_t, delta_speed,
               location_ping_id)) %>%
     group_by(trip_id_performed) %>%
@@ -518,8 +521,96 @@ phys_eval <- function(distance_df, return_check = FALSE) {
            violate_implied_speed = violate_implied_speed_count > 0,
            violate_implied_accel = violate_implied_accel_count > 0,
            violate_any = violate_mono | violate_speed |
-             violate_implied_accel | violate_implied_speed)
+             violate_implied_accel | violate_implied_speed) %>%
+    ungroup()
   
+  return(trips_df)
+}
+
+# Summarize violations
+phys_eval <- function(distance_df, return_check = FALSE) {
+  
+  check_df <- points_vio(distance_df = distance_df)
+  trips_df <- trips_vio(point_check_df = check_df)
+  
+  # if want to return point-by-point check
+  if (return_check) {
+    return(check_df)
+  }
+  
+  # Bootstrap
+  points_b <- list()
+  trips_b <- list()
+  for (i in B) {
+    
+    # Resample points
+    points_resampled <- check_df %>%
+      select(location_ping_id,
+             violate_mono, violate_speed,
+             violate_implied_speed, violate_implied_accel) %>%
+      slice_sample(
+        # Proportion -- all
+        prop = 1,
+        # With replacement
+        replace = TRUE
+      )
+    points_est <- points_resampled %>%
+      summarize(n_obs = n(),
+                n_vio_mono = sum(violate_mono),
+                n_vio_speed = sum(violate_speed),
+                n_vio_implied_speed = sum(violate_implied_speed),
+                n_vio_implied_accel = sum(violate_implied_accel)) %>%
+      pivot_longer(cols = c("n_vio_mono",
+                            "n_vio_speed", "n_vio_implied_speed",
+                            "n_vio_implied_accel"),
+                   names_to = "Violation", values_to = "n_obs_vio")
+    
+    # Resample trips
+    trips_resampled <- trips_df %>%
+      select(trip_id_performed,
+             violate_mono, violate_speed,
+             violate_implied_speed, violate_implied_accel) %>%
+      slice_sample(
+        # Proportion -- all
+        prop = 1,
+        # With replacement
+        replace = TRUE
+      )
+    trips_est <- trips_resampled %>%
+      summarize(n_trips = n(),
+                n_vio_mono = sum(violate_mono),
+                n_vio_speed = sum(violate_speed),
+                n_vio_implied_speed = sum(violate_implied_speed),
+                n_vio_implied_accel = sum(violate_implied_accel)) %>%
+      pivot_longer(cols = c("n_vio_mono",
+                            "n_vio_speed", "n_vio_implied_speed",
+                            "n_vio_implied_accel"),
+                   names_to = "Violation", values_to = "n_trips_vio")
+    
+    # Save results
+    points_b[[i]] <- points_est
+    trips_b[[i]] <- trips_est
+  }
+  points_boot <- bind_rows(points_b, .id = "b_iter")
+  trips_boot <- bind_rows(trips_b, .id = "b_iter")
+  
+  # Bootstrapped standard errors
+  points_sd <- points_boot %>%
+    group_by(Violation) %>%
+    summarize(points_sd = sd(n_obs_vio)) %>%
+    mutate(points_sd = case_when(
+      points_sd < 0.1 ~ "< 0.1",
+      .default = sprintf(points_sd, fmt = "%.1f")
+  ))
+  trips_sd <- trips_boot %>%
+    group_by(Violation) %>%
+    summarize(trips_sd = sd(n_trips_vio)) %>%
+    mutate(trips_sd = case_when(
+      trips_sd < 0.1 ~ "< 0.1",
+      .default = sprintf(trips_sd, fmt = "%.1f")
+  ))
+  
+  # Summarize trip-wize violations
   trip_summ <- trips_df %>%
     summarize(n_trips = n(),
               n_vio_mono = sum(violate_mono),
@@ -530,6 +621,8 @@ phys_eval <- function(distance_df, return_check = FALSE) {
                           "n_vio_speed", "n_vio_implied_speed",
                           "n_vio_implied_accel"),
                  names_to = "Violation", values_to = "n_trips_vio") %>%
+    left_join(y = trips_sd,
+              by = "Violation") %>%
     mutate(perc_trips_vio = n_trips_vio / n_trips,
            perc_trips_vio = scales::percent(perc_trips_vio,
                                             accuracy = 0.01),
@@ -556,6 +649,8 @@ phys_eval <- function(distance_df, return_check = FALSE) {
                           "n_vio_speed", "n_vio_implied_speed",
                           "n_vio_implied_accel"),
                  names_to = "Violation", values_to = "n_obs_vio") %>%
+    left_join(y = points_sd,
+              by = "Violation") %>%
     mutate(perc_obs_vio = n_obs_vio / n_obs,
            perc_obs_vio = scales::percent(perc_obs_vio,
                                           accuracy = 0.01),
@@ -591,7 +686,7 @@ eval_phys <- bind_rows(
 # get trip & obs count
 n_trips <- unique(eval_phys$n_trips)
 n_obs <- unique(eval_phys$n_obs)
-cat(n_trips, " trips and ", n_obs, " APC observations",
+cat(n_trips, " trips and ", n_obs, " AVL observations",
     sep = "")
 
 # Make table pretty
@@ -599,7 +694,8 @@ eval_phys_piv <- eval_phys %>%
   select(-c(n_trips, n_obs, perc_obs_vio, perc_trips_vio)) %>%
   pivot_wider(id_cols = "Violation",
               names_from = Direction,
-              values_from = c("n_trips_vio", "n_obs_vio")) %>%
+              values_from = c("n_trips_vio", "n_obs_vio",
+                              "trips_sd", "points_sd")) %>%
   mutate(delta_trips = parse_number(n_trips_vio_Bidirectional) -
            parse_number(n_trips_vio_Forward),
          perc_trips = delta_trips / parse_number(n_trips_vio_Forward),
@@ -611,22 +707,28 @@ eval_phys_piv <- eval_phys %>%
          perc_obs = percent(perc_obs, accuracy = 0.01),
          perc_trips = replace_na(perc_trips, "0.00%"),
          perc_obs = replace_na(perc_obs, "0.00%"),
+         n_trips_vio_Forward = paste(n_trips_vio_Forward,
+                                     " (", trips_sd_Forward, ")",
+                                     sep = ""),
+         n_obs_vio_Forward = paste(n_obs_vio_Forward,
+                                   " (", points_sd_Forward, ")",
+                                   sep = ""),
          n_trips_vio_Bidirectional = paste(n_trips_vio_Bidirectional,
-                                           " (", perc_trips, ")",
+                                           " (", trips_sd_Bidirectional, ")",
                                            sep = ""),
          n_obs_vio_Bidirectional = paste(n_obs_vio_Bidirectional,
-                                         " (", perc_obs, ")",
+                                         " (", points_sd_Bidirectional, ")",
                                          sep = "")) %>%
-  select(Violation, n_trips_vio_Forward, n_trips_vio_Bidirectional,
-         n_obs_vio_Forward, n_obs_vio_Bidirectional)
+  select(Violation, n_trips_vio_Forward, n_trips_vio_Bidirectional, perc_trips,
+         n_obs_vio_Forward, n_obs_vio_Bidirectional, perc_obs)
 
 # Print table
 knitr::kable(eval_phys_piv)
 ```
 
-``` {r, eval = FALSE, echo = FALSE}
+``` {r, eval = TRUE, echo = FALSE}
 write.csv(x = eval_phys_piv,
-          file = "C:\\Users\\obrie\\OneDrive - University of Illinois - Urbana\\IndyGo Project\\Deliverables\\Papers\\JPT_v2\\tables\\mono_phys_eval_11-13-26.csv")
+          file = "C:\\Users\\obrie\\OneDrive - University of Illinois - Urbana\\IndyGo Project\\Deliverables\\Papers\\JPT_v2\\tables\\mono_phys_eval_11-23-26.csv")
 ```
 
 The proposed bidirectional method improves both acceleration and implied speeds.
@@ -751,39 +853,97 @@ avl_apc_summ <- function(avl_apc) {
       group_by(trip_id_performed, stop_name) %>%
       summarize(min_speed = min(speed),
                 .groups = "keep") %>%
-      mutate(makes_stop = min_speed < stop_cutoff)
+      mutate(makes_stop = min_speed < stop_cutoff) %>%
+    ungroup()
+  trip_stops <- avl_stops %>%
+    group_by(trip_id_performed) %>%
+    summarize(n_apc_stops = n(),
+              n_avl_stops = sum(makes_stop)) %>%
+    mutate(vio = n_avl_stops < n_apc_stops) %>%
+    ungroup()
+  
+  # Bootstrap
+  points_b <- list()
+  trips_b <- list()
+  for (i in B) {
+    
+    # Resample points
+    points_resampled <- avl_stops %>%
+      select(stop_name, makes_stop) %>%
+      slice_sample(
+        # Proportion -- all
+        prop = 1,
+        # With replacement
+        replace = TRUE
+      )
+    points_est <- points_resampled %>%
+      summarize(n_apc_stops = n(),
+                n_avl_stops = sum(makes_stop),
+              ) %>%
+      pivot_longer(cols = c("n_avl_stops"),
+                   names_to = "Violation", values_to = "n_obs_matching") %>%
+      mutate(n_obs_vio = n_apc_stops - n_obs_matching)
+    
+    # Resample trips
+    trips_resampled <- trip_stops %>%
+      select(trip_id_performed, vio) %>%
+      slice_sample(
+        # Proportion -- all
+        prop = 1,
+        # With replacement
+        replace = TRUE
+      )
+    trips_est <- trips_resampled %>%
+      summarize(n_trips = n(),
+                n_vio = sum(vio)) %>%
+      pivot_longer(cols = c("n_vio"),
+                   names_to = "Violation", values_to = "n_trips_vio")
+    
+    # Save results
+    points_b[[i]] <- points_est
+    trips_b[[i]] <- trips_est
+  }
+  points_boot <- bind_rows(points_b, .id = "b_iter")
+  trips_boot <- bind_rows(trips_b, .id = "b_iter")
+  
+  # Get standard errors
+  points_sd <- points_boot %>%
+    group_by(Violation) %>%
+    summarize(points_sd = sd(n_obs_vio)) %>%
+    mutate(points_sd = case_when(
+      points_sd < 0.1 ~ "< 0.1",
+      .default = sprintf(points_sd, fmt = "%.1f")
+  ))
+  trips_sd <- trips_boot %>%
+    group_by(Violation) %>%
+    summarize(trips_sd = sd(n_trips_vio)) %>%
+    mutate(trips_sd = case_when(
+      trips_sd < 0.1 ~ "< 0.1",
+      .default = sprintf(trips_sd, fmt = "%.1f")
+  ))
 
   # summary
   point_summ <- avl_stops %>%
-    ungroup() %>%
     summarize(n_apc_stops = n(),
               n_avl_stops = sum(makes_stop)) %>%
     pivot_longer(cols = c("n_avl_stops"),
                  names_to = "Violation", values_to = "n_obs_matching") %>%
+    left_join(y = points_sd, by = "Violation") %>%
     mutate(n_obs_vio = n_apc_stops - n_obs_matching,
-           perc_obs_vio = (n_obs_vio / n_apc_stops),
-           perc_obs_vio = scales::percent(perc_obs_vio,
-                                          accuracy = 0.01),
            Violation = "APC Dwell",
            n_apc_stops = format(n_apc_stops, big.mark = ",", scientific = FALSE),
            n_obs_vio = format(n_obs_vio, big.mark = ",", scientific = FALSE)) %>%
     select(-c(n_obs_matching)) %>%
     rename(n_obs = n_apc_stops)
   
-  trip_summ <- avl_stops %>%
-    ungroup() %>%
-    group_by(trip_id_performed) %>%
-    summarize(n_apc_stops = n(),
-              n_avl_stops = sum(makes_stop)) %>%
-    mutate(vio = n_avl_stops < n_apc_stops) %>%
+  trip_summ <- trip_stops %>%
     summarize(n_trips = n(),
               n_vio = sum(vio)) %>%
     pivot_longer(cols = c("n_vio"),
                  names_to = "Violation", values_to = "n_trips_vio") %>%
-    mutate(perc_trips_vio = n_trips_vio / n_trips,
-           perc_trips_vio = scales::percent(perc_trips_vio,
-                                            accuracy = 0.01),
-           Violation = "APC Dwell",
+    left_join(y = trips_sd,
+              by = "Violation") %>%
+    mutate(Violation = "APC Dwell",
            n_trips = format(n_trips, big.mark = ",", scientific = FALSE),
            n_trips_vio = format(n_trips_vio, big.mark = ",", scientific = FALSE))
   
@@ -815,10 +975,11 @@ cat(n_trips, " trips and ", n_obs, " AVL observations",
 
 # Make table pretty
 data_eval_piv <- data_eval %>%
-  select(-c(n_trips, n_obs, perc_obs_vio, perc_trips_vio)) %>%
+  select(-c(n_trips, n_obs)) %>%
   pivot_wider(id_cols = "Violation",
               names_from = Direction,
-              values_from = c("n_trips_vio", "n_obs_vio")) %>%
+              values_from = c("n_trips_vio", "n_obs_vio",
+                              "trips_sd", "points_sd")) %>%
   mutate(delta_trips = parse_number(n_trips_vio_Bidirectional) -
            parse_number(n_trips_vio_Forward),
          perc_trips = delta_trips / parse_number(n_trips_vio_Forward),
@@ -830,22 +991,28 @@ data_eval_piv <- data_eval %>%
          perc_obs = percent(perc_obs, accuracy = 0.01),
          perc_trips = replace_na(perc_trips, "0.00%"),
          perc_obs = replace_na(perc_obs, "0.00%"),
+         n_trips_vio_Forward = paste(n_trips_vio_Forward,
+                                     " (", trips_sd_Forward, ")",
+                                     sep = ""),
+         n_obs_vio_Forward = paste(n_obs_vio_Forward,
+                                   " (", points_sd_Forward, ")",
+                                   sep = ""),
          n_trips_vio_Bidirectional = paste(n_trips_vio_Bidirectional,
-                                           " (", perc_trips, ")",
+                                           " (", trips_sd_Bidirectional, ")",
                                            sep = ""),
          n_obs_vio_Bidirectional = paste(n_obs_vio_Bidirectional,
-                                         " (", perc_obs, ")",
+                                         " (", points_sd_Bidirectional, ")",
                                          sep = "")) %>%
-  select(Violation, n_trips_vio_Forward, n_trips_vio_Bidirectional,
-         n_obs_vio_Forward, n_obs_vio_Bidirectional)
+  select(Violation, n_trips_vio_Forward, n_trips_vio_Bidirectional, perc_trips,
+         n_obs_vio_Forward, n_obs_vio_Bidirectional, perc_obs)
 
 # Print table
 knitr::kable(data_eval_piv)
 ```
 
-``` {r, eval = FALSE, echo = FALSE}
+``` {r, eval = TRUE, echo = FALSE}
 write.csv(x = data_eval_piv,
-          file = "C:\\Users\\obrie\\OneDrive - University of Illinois - Urbana\\IndyGo Project\\Deliverables\\Papers\\JPT_v2\\tables\\mono_data_eval_11-13-26.csv")
+          file = "C:\\Users\\obrie\\OneDrive - University of Illinois - Urbana\\IndyGo Project\\Deliverables\\Papers\\JPT_v2\\tables\\mono_data_eval_11-23-26.csv")
 ```
 
 The proposed method does not seem to meaningfully change data alignment; both trajectories and AVL points have slight increases in violations.
@@ -1045,8 +1212,6 @@ saveRDS(res,
 ``` {r, echo = FALSE, eval = TRUE}
 res <- readRDS("C:\\Users\\obrie\\OneDrive - University of Illinois - Urbana\\IndyGo Project\\Analysis_new\\results\\cross_validation\\mono_CV_residuals_11-13-2026.rds")
 ```
-
-## Bootstrapped Standard Errors
 
 Now we have point-wise distance and speed errors. We'll calculate our aggregated prediction errors. Below we define a function to calculate the RMSE of the point-wise residuals:
 
