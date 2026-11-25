@@ -953,7 +953,7 @@ avl_summ <- avl_df %>%
   group_by(trip_id_performed) %>%
   summarize(t_min = min(event_timestamp),
             t_max = max(event_timestamp),
-            t = as.numeric(t_max) - as.numeric(t_min),
+            t = as.numeric(difftime(t_max, t_min, units = "s")),
             n_obs = n(),
             freq = t / n_obs)
 keep_trips <- avl_summ %>%
@@ -977,12 +977,18 @@ base_summ <- base_df %>%
   group_by(trip_id_performed) %>%
   summarize(t_min = min(event_timestamp),
             t_max = max(event_timestamp),
-            t = as.numeric(t_max) - as.numeric(t_min),
+            t = as.numeric(difftime(t_max, t_min, units = "s")),
             n_obs = n(),
-            freq = t / n_obs)
-cat("Avg polling frequency: ", mean(base_summ$freq),
-    "\nIQR: ", quantile(base_summ$freq, 0.25), " - ",
-    quantile(base_summ$freq, 0.75), sep = "")
+            freq = t / n_obs) %>%
+  ungroup() %>%
+  summarize(sum_t = sum(t),
+            sum_n = sum(n_obs),
+            freq_25th = quantile(freq, 0.25),
+            freq_75th = quantile(freq, 0.75)) %>%
+  mutate(mean_freq = sum_t / sum_n)
+cat("Avg polling frequency: ", base_summ$mean_freq,
+    "\nIQR: ", base_summ$freq_25th, " - ", base_summ$freq_75th,
+    sep = "")
 ```
 
 ### Implementation
@@ -1122,8 +1128,9 @@ Those three functions are the bulk of the work we need. We'll set up a nested fo
 #'    - first batch: c(10, 15, 20, 25, 30). for main results table.
 #'    - second batch: c(35, 40, 50, 55, 60). to include in scaling figure.
 #'    - third batch: c(45). missed it in the second batch. oops.
-test_freqs <- c(45)
+test_freqs <- c(10, 15, 20, 25, 30)
 res_list <- list()
+train_list <- list()
 
 for (freq in test_freqs) {
   print(paste("Current freq: ", freq, " s",
@@ -1183,14 +1190,22 @@ for (freq in test_freqs) {
     )
 
     res_list[[paste(freq, off, sep = "-")]] <- current_res
+    train_list[[paste(freq, off, sep = "-")]] <- train_df %>%
+      mutate(freq = freq,
+             off = off)
   }
 }
 
 # Bind all residuals into a single dataframe
 res <- bind_rows(res_list)
+
+# Bind training datasets together
+train <- bind_rows(train_list)
 ```
 
 ``` {r, eval = FALSE, echo = FALSE}
+saveRDS(train,
+        "C:\\Users\\obrie\\OneDrive - University of Illinois - Urbana\\IndyGo Project\\Analysis_new\\results\\cross_validation\\CV_training_batch1_11-24-2026.rds")
 saveRDS(res,
         "C:\\Users\\obrie\\OneDrive - University of Illinois - Urbana\\IndyGo Project\\Analysis_new\\results\\cross_validation\\CV_residuals_batch3_11-11-2026.rds")
 ```
@@ -1199,11 +1214,47 @@ saveRDS(res,
 # The above loop takes a very, very long time to run
 # To avoid re-running each time this vignette is knit, we saved the
 # results once and load them here
+train <- readRDS("C:\\Users\\obrie\\OneDrive - University of Illinois - Urbana\\IndyGo Project\\Analysis_new\\results\\cross_validation\\CV_training_batch1_11-24-2026.rds")
 res <- rbind(
   readRDS("C:\\Users\\obrie\\OneDrive - University of Illinois - Urbana\\IndyGo Project\\Analysis_new\\results\\cross_validation\\CV_residuals_batch1_11-11-2026.rds"),
   readRDS("C:\\Users\\obrie\\OneDrive - University of Illinois - Urbana\\IndyGo Project\\Analysis_new\\results\\cross_validation\\CV_residuals_batch2_11-11-2026.rds"),
   readRDS("C:\\Users\\obrie\\OneDrive - University of Illinois - Urbana\\IndyGo Project\\Analysis_new\\results\\cross_validation\\CV_residuals_batch3_11-11-2026.rds")
 )
+```
+
+Before getting our main results, we'll find the actual, realized average polling frequencies across each simulated frequency:
+
+``` {r}
+# Find average frequencies across all trips
+train_summ <- train %>%
+  group_by(trip_id_performed, freq, off) %>%
+  summarize(n_obs = n(),
+            t_max = max(event_timestamp),
+            t_min = min(event_timestamp),
+            .groups = "keep") %>%
+  ungroup() %>%
+  mutate(dt = as.numeric(difftime(t_max, t_min, units = "s")),
+         avg_freq = dt / n_obs) %>%
+  # method- & frequency-wise average
+  group_by(freq) %>%
+  summarize(avg_trip = mean(avg_freq),
+            sum_dt = sum(dt),
+            sum_n = sum(n_obs),
+            freq_25th = quantile(avg_freq, 0.25),
+            freq_75th = quantile(avg_freq, 0.75),
+            .groups = "keep") %>%
+  mutate(freq_mean = sum_dt / sum_n) %>%
+  ungroup() %>%
+  arrange(freq) %>%
+  # make pretty
+  mutate(avg_trip = sprintf(avg_trip, fmt = "%.2f"),
+         freq_mean = sprintf(freq_mean, fmt = "%.2f"),
+         freq_iqr = paste("[", sprintf(freq_25th, fmt = "%.2f"),
+                     ", ", sprintf(freq_75th, fmt = "%.2f"),
+                     "]", sep = "")) %>%
+  rename(freq_target = freq) %>%
+  select(freq_target, freq_mean, avg_trip, freq_iqr)
+knitr::kable(train_summ)
 ```
 
 Now we have point-wise distance and speed errors. We'll calculate our aggregated prediction errors. Below we define a function to calculate the RMSE of the point-wise residuals:

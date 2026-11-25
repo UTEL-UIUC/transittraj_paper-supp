@@ -992,7 +992,7 @@ avl_summ <- avl_df %>%
   group_by(trip_id_performed) %>%
   summarize(t_min = min(event_timestamp),
             t_max = max(event_timestamp),
-            t = as.numeric(t_max) - as.numeric(t_min),
+            t = as.numeric(difftime(t_max, t_min, units = "s")),
             n_obs = n(),
             freq = t / n_obs)
 keep_trips <- avl_summ %>%
@@ -1018,13 +1018,19 @@ base_summ <- base_df %>%
   group_by(trip_id_performed) %>%
   summarize(t_min = min(event_timestamp),
             t_max = max(event_timestamp),
-            t = as.numeric(t_max) - as.numeric(t_min),
+            t = as.numeric(difftime(t_max, t_min, units = "s")),
             n_obs = n(),
-            freq = t / n_obs)
-cat("Avg polling frequency: ", mean(base_summ$freq),
-    "\nIQR: ", quantile(base_summ$freq, 0.25), " - ",
-    quantile(base_summ$freq, 0.75), sep = "")
-#> Avg polling frequency: 5.858562
+            freq = t / n_obs) %>%
+  ungroup() %>%
+  summarize(sum_t = sum(t),
+            sum_n = sum(n_obs),
+            freq_25th = quantile(freq, 0.25),
+            freq_75th = quantile(freq, 0.75)) %>%
+  mutate(mean_freq = sum_t / sum_n)
+cat("Avg polling frequency: ", base_summ$mean_freq,
+    "\nIQR: ", base_summ$freq_25th, " - ", base_summ$freq_75th,
+    sep = "")
+#> Avg polling frequency: 5.840361
 #> IQR: 5.376368 - 6.333333
 ```
 
@@ -1169,8 +1175,9 @@ Those three functions are the bulk of the work we need. We'll set up a nested fo
 #'    - first batch: c(10, 15, 20, 25, 30). for main results table.
 #'    - second batch: c(35, 40, 50, 55, 60). to include in scaling figure.
 #'    - third batch: c(45). missed it in the second batch. oops.
-test_freqs <- c(45)
+test_freqs <- c(10, 15, 20, 25, 30)
 res_list <- list()
+train_list <- list()
 
 for (freq in test_freqs) {
   print(paste("Current freq: ", freq, " s",
@@ -1230,14 +1237,68 @@ for (freq in test_freqs) {
     )
 
     res_list[[paste(freq, off, sep = "-")]] <- current_res
+    train_list[[paste(freq, off, sep = "-")]] <- train_df %>%
+      mutate(freq = freq,
+             off = off)
   }
 }
 
 # Bind all residuals into a single dataframe
 res <- bind_rows(res_list)
+
+# Bind training datasets together
+train <- bind_rows(train_list)
 ```
 
 
+
+
+
+Before getting our main results, we'll find the actual, realized average polling frequencies across each simulated frequency:
+
+
+``` r
+# Find average frequencies across all trips
+train_summ <- train %>%
+  group_by(trip_id_performed, freq, off) %>%
+  summarize(n_obs = n(),
+            t_max = max(event_timestamp),
+            t_min = min(event_timestamp),
+            .groups = "keep") %>%
+  ungroup() %>%
+  mutate(dt = as.numeric(difftime(t_max, t_min, units = "s")),
+         avg_freq = dt / n_obs) %>%
+  # method- & frequency-wise average
+  group_by(freq) %>%
+  summarize(avg_trip = mean(avg_freq),
+            sum_dt = sum(dt),
+            sum_n = sum(n_obs),
+            freq_25th = quantile(avg_freq, 0.25),
+            freq_75th = quantile(avg_freq, 0.75),
+            .groups = "keep") %>%
+  mutate(freq_mean = sum_dt / sum_n) %>%
+  ungroup() %>%
+  arrange(freq) %>%
+  # make pretty
+  mutate(avg_trip = sprintf(avg_trip, fmt = "%.2f"),
+         freq_mean = sprintf(freq_mean, fmt = "%.2f"),
+         freq_iqr = paste("[", sprintf(freq_25th, fmt = "%.2f"),
+                     ", ", sprintf(freq_75th, fmt = "%.2f"),
+                     "]", sep = "")) %>%
+  rename(freq_target = freq) %>%
+  select(freq_target, freq_mean, avg_trip, freq_iqr)
+knitr::kable(train_summ)
+```
+
+
+
+| freq_target|freq_mean |avg_trip |freq_iqr       |
+|-----------:|:---------|:--------|:--------------|
+|          10|11.50     |11.53    |[10.62, 12.47] |
+|          15|17.14     |17.18    |[15.83, 18.54] |
+|          20|22.74     |22.79    |[21.01, 24.62] |
+|          25|28.32     |28.38    |[26.16, 30.67] |
+|          30|33.81     |33.87    |[31.21, 36.63] |
 
 
 
